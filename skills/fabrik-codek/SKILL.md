@@ -1,7 +1,7 @@
 ---
 name: fabrik-codek
 description: "Cognitive architecture for developers: hybrid RAG (vector + knowledge graph) that learns from your coding sessions and grows smarter over time. Connects any Ollama model to your accumulated project knowledge. 100% local, zero cloud dependencies."
-version: 1.0.0
+version: 1.2.0
 homepage: https://github.com/ikchain/Fabrik-Codek
 user-invocable: true
 metadata:
@@ -22,7 +22,7 @@ metadata:
 
 Fabrik-Codek is a **cognitive architecture** — a system where perception, memory, reasoning, learning, and action work together, much like how a human developer accumulates expertise over time. Unlike plain RAG tools that just retrieve text, Fabrik-Codek builds a persistent knowledge graph of entities and relationships (technologies, patterns, decisions) alongside vector search, and continuously improves through a data flywheel that captures what you do and feeds it back into every future query.
 
-**How it works**: You code normally. Fabrik-Codek observes your sessions, extracts knowledge (patterns, decisions, debugging strategies), stores it in both a vector DB (LanceDB) and a knowledge graph (NetworkX), and uses hybrid retrieval to give your AI agent deep project context — not just keyword matches, but an understanding of how concepts in your codebase connect.
+**How it works**: When you run `fabrik learn process`, Fabrik-Codek reads your local Claude Code session transcript files (`~/.claude/projects/*/` — JSON files already on your disk) and extracts structured knowledge (patterns, decisions, debugging strategies). It stores this in a local vector DB (LanceDB, in `./data/embeddings/`) and a local knowledge graph (NetworkX, in `./data/graphdb/`). When you query via MCP tools, it uses hybrid retrieval to give your AI agent deep project context — not just keyword matches, but an understanding of how concepts in your codebase connect. No data leaves your machine at any point.
 
 ## Setup
 
@@ -92,3 +92,6 @@ Check system health: Ollama availability, RAG engine, knowledge graph, and datal
 - **100% local**: All data stays on your machine. No external API calls, no telemetry, no cloud dependencies.
 - **No credentials required**: Fabrik-Codek connects only to your local Ollama instance (`localhost:11434`).
 - **External endpoints**: None. This skill does not contact any external services.
+- **Data storage**: All indexed data is stored locally in `./data/` (vector embeddings in `./data/embeddings/`, knowledge graph in `./data/graphdb/`). Nothing is uploaded anywhere.
+- **Session reading**: The `fabrik learn` command reads Claude Code transcript files from `~/.claude/projects/` — these are local JSON files already on your disk. This is an opt-in action triggered manually by the user, not automatic background surveillance.
+- **Source code**: Fully open source at [github.com/ikchain/Fabrik-Codek](https://github.com/ikchain/Fabrik-Codek) (MIT license). The `pip install` pulls from this public repository.
