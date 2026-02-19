@@ -1,9 +1,21 @@
 ---
 name: fabrik-codek
 description: Local AI knowledge base powered by hybrid RAG (vector + knowledge graph). Connects any Ollama model to your accumulated project knowledge. Privacy-first, runs 100% locally.
+version: 1.0.0
 homepage: https://github.com/ikchain/Fabrik-Codek
 user-invocable: true
-metadata: {"openclaw": {"requires": {"bins": ["fabrik"]}, "emoji": "🧠"}}
+metadata:
+  clawdbot:
+    requires:
+      bins: [fabrik]
+      anyBins: [python3, python]
+    homepage: https://github.com/ikchain/Fabrik-Codek
+    os: [macos, linux]
+    emoji: "🧠"
+    install:
+      - kind: pip
+        package: fabrik-codek
+        bins: [fabrik]
 ---
 
 # Fabrik-Codek - Local AI Knowledge Base
@@ -72,3 +84,9 @@ Check system health: Ollama availability, RAG engine, knowledge graph, and datal
 
 - [Fabrik-Codek](https://github.com/ikchain/Fabrik-Codek) installed (`pip install fabrik-codek`)
 - [Ollama](https://ollama.ai/) running locally with a model pulled (e.g., `ollama pull qwen2.5-coder:7b`)
+
+## Security & Privacy
+
+- **100% local**: All data stays on your machine. No external API calls, no telemetry, no cloud dependencies.
+- **No credentials required**: Fabrik-Codek connects only to your local Ollama instance (`localhost:11434`).
+- **External endpoints**: None. This skill does not contact any external services.
