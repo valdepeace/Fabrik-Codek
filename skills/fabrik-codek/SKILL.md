@@ -1,7 +1,7 @@
 ---
 name: fabrik-codek
-description: "Cognitive architecture for developers: hybrid RAG (vector + knowledge graph) that learns from your coding sessions and grows smarter over time. Connects any Ollama model to your accumulated project knowledge. 100% local, zero cloud dependencies."
-version: 1.2.0
+description: "Cognitive architecture for developers: three-tier hybrid retrieval (vector + knowledge graph + full-text search) that learns from your coding sessions and grows smarter over time. Connects any Ollama model to your accumulated project knowledge. 100% local, zero cloud dependencies."
+version: 1.3.0
 homepage: https://github.com/ikchain/Fabrik-Codek
 user-invocable: true
 metadata:
@@ -24,7 +24,7 @@ metadata:
 
 # Fabrik-Codek - Local Cognitive Architecture for Developers
 
-Fabrik-Codek is a **cognitive architecture** — a system where perception, memory, reasoning, learning, and action work together, much like how a human developer accumulates expertise over time. Unlike plain RAG tools that just retrieve text, Fabrik-Codek builds a persistent knowledge graph of entities and relationships (technologies, patterns, decisions) alongside vector search, and continuously improves through a data flywheel that captures what you do and feeds it back into every future query.
+Fabrik-Codek is a **cognitive architecture** — a system where perception, memory, reasoning, learning, and action work together, much like how a human developer accumulates expertise over time. Unlike plain RAG tools that just retrieve text, Fabrik-Codek combines three retrieval tiers — vector search (semantic), knowledge graph traversal (relational), and full-text search (keyword/BM25) — fused via Reciprocal Rank Fusion (RRF). It continuously improves through a data flywheel that captures what you do and feeds it back into every future query.
 
 **How it works**: When you run `fabrik learn process`, Fabrik-Codek reads your local Claude Code session transcript files (`~/.claude/projects/*/` — JSON files already on your disk) and extracts structured knowledge (patterns, decisions, debugging strategies). It stores this in a local vector DB (LanceDB, in `./data/embeddings/`) and a local knowledge graph (NetworkX, in `./data/graphdb/`). When you query via MCP tools, it uses hybrid retrieval to give your AI agent deep project context — not just keyword matches, but an understanding of how concepts in your codebase connect. No data leaves your machine at any point.
 
@@ -68,8 +68,13 @@ Search the knowledge graph for entities (technologies, patterns, strategies) and
 
 Example: "Find entities related to FastAPI in the knowledge graph"
 
+### fabrik_fulltext_search
+Full-text keyword search via Meilisearch. Use this for exact keyword or phrase matching when you know the specific terms you're looking for. Requires Meilisearch running locally (optional — system works without it).
+
+Example: "Search for 'retry exponential backoff' in the knowledge base"
+
 ### fabrik_ask
-Ask a coding question to the local LLM with optional context from the knowledge base. Set `use_rag=true` for vector search context or `use_graph=true` for hybrid (vector + graph) context.
+Ask a coding question to the local LLM with optional context from the knowledge base. Set `use_rag=true` for vector search context or `use_graph=true` for hybrid (vector + graph + fulltext) context.
 
 Example: "Ask fabrik how to implement dependency injection using knowledge base context"
 
@@ -77,11 +82,11 @@ Example: "Ask fabrik how to implement dependency injection using knowledge base 
 Get statistics about the knowledge graph: entity counts, relationship types, and graph density.
 
 ### fabrik_status
-Check system health: Ollama availability, RAG engine, knowledge graph, and datalake status.
+Check system health: Ollama availability, RAG engine, knowledge graph, full-text search, and datalake status.
 
 ## When to Use
 
-- **Need project context?** Use `fabrik_search` to find relevant knowledge
+- **Need project context?** Use `fabrik_search` for semantic similarity or `fabrik_fulltext_search` for exact keyword matching
 - **Exploring relationships?** Use `fabrik_graph_search` to traverse the knowledge graph
 - **Coding question?** Use `fabrik_ask` with `use_rag` or `use_graph` for context-enriched answers
 - **Checking setup?** Use `fabrik_status` to verify all components are running
