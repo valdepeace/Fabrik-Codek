@@ -4,9 +4,9 @@
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests: 455](https://img.shields.io/badge/tests-455%20passing-brightgreen.svg)]()
+[![Tests: 527](https://img.shields.io/badge/tests-527%20passing-brightgreen.svg)]()
 
-Fabrik-Codek is a local AI development assistant that works with **any model via Ollama** (Qwen, Llama, DeepSeek, Codestral, Phi, Mistral...) and combines hybrid RAG (vector + knowledge graph) to provide context-aware coding assistance. It features a CLI, a REST API, and a continuous data flywheel that improves over time. No vendor lock-in — switch models with a flag.
+Fabrik-Codek is a local AI development assistant that works with **any model via Ollama** (Qwen, Llama, DeepSeek, Codestral, Phi, Mistral...) and combines three-tier hybrid retrieval (vector + knowledge graph + full-text search) to provide context-aware coding assistance. It features a CLI, a REST API, and a continuous data flywheel that improves over time. No vendor lock-in — switch models with a flag.
 
 ## Architecture
 
@@ -24,6 +24,7 @@ graph TB
     subgraph Knowledge
         RAG[RAG Engine - LanceDB]
         Graph[Knowledge Graph - NetworkX]
+        FT[Full-Text Search - Meilisearch]
         Hybrid[Hybrid RAG]
         Extract[Extraction Pipeline]
     end
@@ -41,6 +42,7 @@ graph TB
 
     Hybrid --> RAG
     Hybrid --> Graph
+    Hybrid --> FT
 
     Extract --> Graph
     Extract -->|heuristic| RAG
@@ -53,9 +55,10 @@ graph TB
 ## Features
 
 - **Model-Agnostic**: Works with any Ollama model — Qwen, Llama, DeepSeek, Codestral, Phi, Mistral, and more. Switch with `--model` or in `.env`
-- **Hybrid RAG**: Combines vector search (LanceDB) with knowledge graph traversal (NetworkX) for rich, context-aware responses
+- **Three-Tier Hybrid RAG**: Combines vector search (LanceDB), knowledge graph traversal (NetworkX), and full-text search (Meilisearch) using Reciprocal Rank Fusion (RRF)
 - **Knowledge Graph**: Automatically extracts entities and relationships from training data, code changes, and session transcripts
-- **REST API**: FastAPI server with 7 endpoints, API key auth, CORS support, and OpenAPI docs
+- **Full-Text Search**: Optional Meilisearch integration for BM25-style keyword search — degrades gracefully when unavailable
+- **REST API**: FastAPI server with 8 endpoints, API key auth, CORS support, and OpenAPI docs
 - **CLI**: Rich terminal interface with interactive chat, single-question mode, and system management commands
 - **Data Flywheel**: Continuous learning from interactions — captures prompts, responses, and reasoning for future improvement
 - **Session Observer**: Extracts training pairs from Claude Code session transcripts
@@ -118,7 +121,7 @@ graph LR
 | **Long-term memory** | Accumulated knowledge that persists across sessions | Knowledge Graph (NetworkX) + Vector DB (LanceDB) |
 | **Episodic memory** | Records of past interactions and reasoning | Session transcripts + auto-captures |
 | **Working memory** | Current conversation context | Prompt + RAG retrieved context |
-| **Perception** | Finding relevant knowledge for a query | Hybrid RAG (vector similarity + graph traversal) |
+| **Perception** | Finding relevant knowledge for a query | Hybrid RAG (vector similarity + graph traversal + full-text search) |
 | **Learning** | Improving from every interaction | Data Flywheel with quality gate (rejects low-quality data) |
 | **Reasoning** | Extracting insights from experience | Thinking block extraction + heuristic/LLM entity extraction |
 | **Action** | Interacting with the developer | CLI (Typer + Rich) + REST API (FastAPI) |
@@ -170,6 +173,9 @@ fabrik status                  # Check system health
 | `fabrik datalake search -q "..."` | Search files in the datalake |
 | `fabrik flywheel stats` | Show flywheel status |
 | `fabrik flywheel export` | Export training pairs |
+| `fabrik fulltext status` | Check Meilisearch connection |
+| `fabrik fulltext index` | Index datalake into Meilisearch |
+| `fabrik fulltext search -q "..."` | Full-text keyword search |
 | `fabrik learn process` | Extract training data from Claude Code sessions |
 
 ## API Reference
@@ -189,7 +195,7 @@ Liveness probe.
 #### `GET /status`
 Component status.
 ```json
-{"ollama": "ok", "rag": "ok", "graph": "ok", "model": "qwen2.5-coder:7b", "datalake": "ok"}
+{"ollama": "ok", "rag": "ok", "graph": "ok", "fulltext": "ok", "model": "qwen2.5-coder:7b", "datalake": "ok"}
 ```
 
 #### `POST /ask`
@@ -223,6 +229,14 @@ Semantic search in the knowledge base.
 curl -X POST http://localhost:8420/search \
   -H "Content-Type: application/json" \
   -d '{"query": "docker networking", "limit": 5}'
+```
+
+#### `POST /fulltext/search`
+Full-text keyword search via Meilisearch.
+```bash
+curl -X POST http://localhost:8420/fulltext/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "retry backoff", "limit": 5}'
 ```
 
 #### `POST /graph/search`
@@ -302,6 +316,7 @@ Add to your `~/.claude/settings.json`:
 | `fabrik_search` | Semantic vector search in the knowledge base |
 | `fabrik_graph_search` | Search knowledge graph entities and relationships |
 | `fabrik_graph_stats` | Get knowledge graph statistics |
+| `fabrik_fulltext_search` | Full-text keyword search via Meilisearch |
 | `fabrik_ask` | Ask a question with optional RAG/graph context |
 
 ### Available Resources
@@ -332,6 +347,10 @@ All settings are configured via environment variables with the `FABRIK_` prefix,
 | `FABRIK_FLYWHEEL_ENABLED` | `true` | Enable data collection |
 | `FABRIK_VECTOR_DB` | `lancedb` | Vector DB backend |
 | `FABRIK_PROJECT_FILTER` | _(none)_ | Filter transcript dirs by project name |
+| `FABRIK_MEILISEARCH_URL` | `http://localhost:7700` | Meilisearch server URL |
+| `FABRIK_MEILISEARCH_KEY` | _(none)_ | Meilisearch API key (optional) |
+| `FABRIK_MEILISEARCH_INDEX` | `fabrik_knowledge` | Meilisearch index name |
+| `FABRIK_FULLTEXT_WEIGHT` | `0.0` | Full-text weight in RRF fusion (0.0 = disabled) |
 | `FABRIK_LOG_LEVEL` | `INFO` | Log level |
 | `FABRIK_LOG_FORMAT` | `console` | Log format (`console` or `json`) |
 
@@ -430,7 +449,7 @@ fabrik-codek/
 │   │   └── extraction/     # Heuristic, LLM, Transcript extractors
 │   ├── flywheel/           # Data collection + session observer
 │   └── tools/              # Code tools
-├── tests/                  # 413 tests
+├── tests/                  # 527 tests
 ├── scripts/                # Setup, benchmarks, enrichment
 ├── data/                   # Local data storage
 ├── prompts/                # Prompt templates
