@@ -179,6 +179,8 @@ fabrik ask "Explain the relationship between FastAPI and Pydantic" --graph
 | `fabrik ask "..." --graph` | Ask with hybrid RAG (vector + graph) |
 | `fabrik status` | Check system status (Ollama, RAG, Graph) |
 | `fabrik serve` | Start the REST API server |
+| `fabrik mcp` | Start as MCP server (stdio) |
+| `fabrik mcp --transport sse` | Start as MCP server (SSE, network) |
 | `fabrik models` | List available Ollama models |
 | `fabrik rag index` | Index the datalake into the vector DB |
 | `fabrik rag search -q "..."` | Semantic search in the knowledge base |
@@ -286,6 +288,53 @@ curl -H "Authorization: Bearer your-secret-key" http://localhost:8420/status
 ```
 
 The `/health` endpoint is always public (no auth required).
+
+## MCP Server
+
+Fabrik-Codek can run as an [MCP](https://modelcontextprotocol.io/) (Model Context Protocol) server, allowing any compatible agent to use it as a local knowledge base.
+
+### Starting the MCP Server
+
+```bash
+# stdio mode (for Claude Code, Cursor, etc.)
+fabrik mcp
+
+# SSE mode (for network access)
+fabrik mcp --transport sse --port 8421
+```
+
+### Configuring in Claude Code
+
+Add to your `~/.claude/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "fabrik-codek": {
+      "command": "fabrik",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+### Available Tools
+
+| Tool | Description |
+|------|-------------|
+| `fabrik_status` | Check system health (Ollama, RAG, Graph, Datalake) |
+| `fabrik_search` | Semantic vector search in the knowledge base |
+| `fabrik_graph_search` | Search knowledge graph entities and relationships |
+| `fabrik_graph_stats` | Get knowledge graph statistics |
+| `fabrik_ask` | Ask a question with optional RAG/graph context |
+
+### Available Resources
+
+| URI | Description |
+|-----|-------------|
+| `fabrik://status` | System component status |
+| `fabrik://graph/stats` | Knowledge graph statistics |
+| `fabrik://config` | Current configuration (sanitized) |
 
 ## Configuration
 
@@ -440,11 +489,11 @@ python scripts/run_eval_benchmark.py --model qwen2.5-coder:7b --category code-re
 python scripts/run_eval_benchmark.py --compare "qwen2.5-coder:7b,qwen2.5-coder:14b"
 ```
 
-## Works with OpenClaw too
+## Works with Any Agent
 
-Got [OpenClaw](https://github.com/anthropics/claude-code) running on your machine? Fabrik-Codek can serve as its local knowledge base — just point it at the REST API (`/search`, `/graph/search`, `/ask`) and it'll feed your accumulated project context into every query. The data flywheel captures how *you* work, and any agent can tap into that knowledge.
+Fabrik-Codek integrates with any MCP-compatible agent — [Claude Code](https://claude.ai/claude-code), [OpenClaw](https://openclaw.ai/), [Cursor](https://cursor.com/), and more. Run `fabrik mcp` and point your agent at it. The MCP server exposes search, graph traversal, and LLM queries — your accumulated project knowledge available to any tool.
 
-The little brother teaching the new kid in the family.
+You can also use the REST API directly (`/search`, `/graph/search`, `/ask`) for non-MCP integrations. The data flywheel captures how *you* work, and any agent can tap into that knowledge.
 
 ## Contributing
 

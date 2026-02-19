@@ -605,6 +605,48 @@ def learn(
 
 
 @app.command()
+def finetune(
+    epochs: int = typer.Option(3, "--epochs", "-e", help="Training epochs"),
+    batch_size: int = typer.Option(2, "--batch-size", "-b", help="Batch size"),
+    max_samples: Optional[int] = typer.Option(None, "--max-samples", "-n", help="Limit training samples"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show stats without training"),
+):
+    """Fine-tune Qwen with your training data."""
+    import subprocess
+
+    if dry_run:
+        # Just show training data stats
+        from src.flywheel.session_observer import get_stats
+        stats = get_stats()
+
+        console.print(Panel.fit("[bold]Fine-tuning Data[/bold]"))
+        table = Table()
+        table.add_column("Métrica", style="cyan")
+        table.add_column("Valor", style="green")
+        table.add_row("Training pairs disponibles", str(stats["total_training_pairs"]))
+        table.add_row("Épocas configuradas", str(epochs))
+        table.add_row("Batch size", str(batch_size))
+        console.print(table)
+
+        console.print("\n[dim]Para entrenar ejecuta sin --dry-run[/dim]")
+        return
+
+    console.print(Panel.fit("[bold yellow]Starting Fine-tuning[/bold yellow]"))
+    console.print("[dim]Esto puede tomar varias horas...[/dim]\n")
+
+    # Run finetune script
+    cmd = [
+        "python", "scripts/finetune.py",
+        "--epochs", str(epochs),
+        "--batch-size", str(batch_size),
+    ]
+    if max_samples:
+        cmd.extend(["--max-samples", str(max_samples)])
+
+    subprocess.run(cmd)
+
+
+@app.command()
 def models():
     """List available Ollama models."""
     from src.core import LLMClient
@@ -717,6 +759,29 @@ def status():
     else:
         console.print("\n[red]✗ Ollama no disponible[/red]")
         console.print("[dim]  Ejecuta: ollama serve[/dim]")
+
+
+@app.command()
+def mcp(
+    transport: str = typer.Option("stdio", "--transport", "-t", help="Transport: stdio or sse"),
+    port: Optional[int] = typer.Option(None, "--port", "-p", help="Port for SSE transport"),
+):
+    """Start Fabrik-Codek as an MCP server for agent integration."""
+    from src.interfaces.mcp_server import mcp as mcp_server
+
+    if transport == "sse":
+        from src.config import settings
+        bind_port = port or settings.mcp_port
+        console.print(
+            Panel.fit(
+                f"[bold blue]Fabrik-Codek MCP Server[/bold blue] (SSE)\n"
+                f"http://127.0.0.1:{bind_port}/sse",
+                subtitle="Ctrl+C to stop",
+            )
+        )
+        mcp_server.run(transport="sse", port=bind_port)
+    else:
+        mcp_server.run(transport="stdio")
 
 
 @app.callback()

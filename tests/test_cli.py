@@ -683,3 +683,86 @@ class TestAsk:
 # TestFinetune
 # ===================================================================
 
+class TestFinetune:
+    """Tests for the ``finetune`` command."""
+
+    def test_finetune_dry_run(self):
+        """finetune --dry-run shows data stats without training."""
+        mock_stats = {
+            "sessions_processed": 20,
+            "total_training_pairs": 8955,
+        }
+
+        with patch(
+            "src.flywheel.session_observer.get_stats",
+            return_value=mock_stats,
+        ):
+            result = runner.invoke(app, ["finetune", "--dry-run"])
+
+        assert result.exit_code == 0
+        assert "Fine-tuning Data" in result.output
+        assert "8955" in result.output
+        assert "sin --dry-run" in result.output
+
+    def test_finetune_dry_run_with_options(self):
+        """finetune --dry-run shows configured epochs and batch."""
+        mock_stats = {
+            "sessions_processed": 20,
+            "total_training_pairs": 1000,
+        }
+
+        with patch(
+            "src.flywheel.session_observer.get_stats",
+            return_value=mock_stats,
+        ):
+            result = runner.invoke(
+                app, ["finetune", "--dry-run", "--epochs", "5", "--batch-size", "4"]
+            )
+
+        assert result.exit_code == 0
+        assert "5" in result.output
+        assert "4" in result.output
+
+    @patch("subprocess.run")
+    def test_finetune_runs_training_script(self, mock_subprocess):
+        """finetune without --dry-run calls the training subprocess."""
+        result = runner.invoke(app, ["finetune", "--epochs", "2", "--batch-size", "4"])
+
+        assert result.exit_code == 0
+        mock_subprocess.assert_called_once()
+        cmd = mock_subprocess.call_args[0][0]
+        assert "finetune.py" in cmd[1]
+        assert "--epochs" in cmd
+        assert "2" in cmd
+
+    @patch("subprocess.run")
+    def test_finetune_with_max_samples(self, mock_subprocess):
+        """finetune --max-samples passes limit to subprocess."""
+        result = runner.invoke(
+            app, ["finetune", "--epochs", "1", "--max-samples", "100"]
+        )
+
+        assert result.exit_code == 0
+        cmd = mock_subprocess.call_args[0][0]
+        assert "--max-samples" in cmd
+        assert "100" in cmd
+
+
+# ===================================================================
+# TestMCP
+# ===================================================================
+
+class TestMCP:
+    """Tests for the ``mcp`` command."""
+
+    def test_mcp_help(self):
+        """mcp --help shows MCP server description."""
+        result = runner.invoke(app, ["mcp", "--help"])
+        assert result.exit_code == 0
+        assert "MCP" in result.output or "mcp" in result.output
+
+    def test_mcp_transport_option(self):
+        """mcp --help shows transport option."""
+        result = runner.invoke(app, ["mcp", "--help"])
+        assert result.exit_code == 0
+        assert "transport" in result.output.lower() or "stdio" in result.output.lower()
