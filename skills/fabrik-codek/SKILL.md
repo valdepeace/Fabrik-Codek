@@ -1,6 +1,6 @@
 ---
 name: fabrik-codek
-description: Local AI knowledge base powered by hybrid RAG (vector + knowledge graph). Connects any Ollama model to your accumulated project knowledge. Privacy-first, runs 100% locally.
+description: "Cognitive architecture for developers: hybrid RAG (vector + knowledge graph) that learns from your coding sessions and grows smarter over time. Connects any Ollama model to your accumulated project knowledge. 100% local, zero cloud dependencies."
 version: 1.0.0
 homepage: https://github.com/ikchain/Fabrik-Codek
 user-invocable: true
@@ -18,9 +18,11 @@ metadata:
         bins: [fabrik]
 ---
 
-# Fabrik-Codek - Local AI Knowledge Base
+# Fabrik-Codek - Local Cognitive Architecture for Developers
 
-Fabrik-Codek is a local AI dev assistant that combines vector search (LanceDB) with a knowledge graph (NetworkX) to provide context-aware coding assistance. It learns from your interactions via a data flywheel and feeds that knowledge back into every query.
+Fabrik-Codek is a **cognitive architecture** — a system where perception, memory, reasoning, learning, and action work together, much like how a human developer accumulates expertise over time. Unlike plain RAG tools that just retrieve text, Fabrik-Codek builds a persistent knowledge graph of entities and relationships (technologies, patterns, decisions) alongside vector search, and continuously improves through a data flywheel that captures what you do and feeds it back into every future query.
+
+**How it works**: You code normally. Fabrik-Codek observes your sessions, extracts knowledge (patterns, decisions, debugging strategies), stores it in both a vector DB (LanceDB) and a knowledge graph (NetworkX), and uses hybrid retrieval to give your AI agent deep project context — not just keyword matches, but an understanding of how concepts in your codebase connect.
 
 ## Setup
 
