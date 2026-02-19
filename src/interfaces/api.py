@@ -63,6 +63,7 @@ class StatusResponse(BaseModel):
     ollama: str
     rag: str
     graph: str
+    fulltext: str
     model: str
     datalake: str
 
@@ -116,6 +117,25 @@ class GraphStatsResponse(BaseModel):
     relation_types: dict[str, int]
 
 
+class FulltextSearchRequest(BaseModel):
+    query: str = Field(..., min_length=1)
+    category: str | None = None
+    limit: int = Field(default=5, ge=1, le=50)
+
+
+class FulltextSearchResult(BaseModel):
+    text: str
+    source: str
+    category: str
+    score: float
+    origin: str = "fulltext"
+
+
+class FulltextSearchResponse(BaseModel):
+    results: list[FulltextSearchResult]
+    count: int
+
+
 # ---------------------------------------------------------------------------
 # Lifespan: init/cleanup shared resources in app.state
 # ---------------------------------------------------------------------------
@@ -158,7 +178,23 @@ async def lifespan(app: FastAPI):
         logger.warning("graph_init_failed", error=str(exc))
         app.state.graph = None
 
-    # 5. Hybrid RAG (compose rag + graph)
+    # 4b. Full-text engine (Meilisearch) - optional
+    try:
+        from src.knowledge.fulltext_engine import FullTextEngine
+
+        ft = FullTextEngine()
+        if await ft.health_check():
+            await ft.ensure_index()
+            app.state.fulltext = ft
+        else:
+            await ft.close()
+            app.state.fulltext = None
+            logger.info("fulltext_unavailable", msg="Meilisearch not running, skipping")
+    except Exception as exc:
+        logger.warning("fulltext_init_failed", error=str(exc))
+        app.state.fulltext = None
+
+    # 5. Hybrid RAG (vector + graph + optional fulltext)
     if app.state.rag is not None:
         try:
             from src.knowledge.hybrid_rag import HybridRAGEngine
@@ -166,6 +202,8 @@ async def lifespan(app: FastAPI):
             hybrid = HybridRAGEngine(
                 rag_engine=app.state.rag,
                 graph_engine=app.state.graph,
+                fulltext_engine=getattr(app.state, "fulltext", None),
+                fulltext_weight=settings.fulltext_weight,
             )
             hybrid._owns_rag = False
             app.state.hybrid = hybrid
@@ -180,11 +218,14 @@ async def lifespan(app: FastAPI):
         ollama=app.state.ollama_ok,
         rag=app.state.rag is not None,
         graph=app.state.graph is not None,
+        fulltext=getattr(app.state, "fulltext", None) is not None,
     )
 
     yield  # ---- application runs ----
 
     # Shutdown
+    if getattr(app.state, "fulltext", None):
+        await app.state.fulltext.close()
     if app.state.rag:
         await app.state.rag.close()
     await llm.__aexit__(None, None, None)
@@ -288,6 +329,7 @@ async def status(request: Request):
         ollama="ok" if state.ollama_ok else "unavailable",
         rag="ok" if state.rag is not None else "unavailable",
         graph="ok" if state.graph is not None else "unavailable",
+        fulltext="ok" if getattr(state, "fulltext", None) is not None else "unavailable",
         model=settings.default_model,
         datalake="ok" if settings.datalake_path.exists() else "unavailable",
     )
@@ -413,6 +455,29 @@ async def graph_search(req: GraphSearchRequest, request: Request):
         )
 
     return GraphSearchResponse(entities=entity_results, count=len(entity_results))
+
+
+@app.post("/fulltext/search", response_model=FulltextSearchResponse)
+async def fulltext_search(req: FulltextSearchRequest, request: Request):
+    """Full-text keyword search via Meilisearch."""
+    state = request.app.state
+    if getattr(state, "fulltext", None) is None:
+        return FulltextSearchResponse(results=[], count=0)
+
+    results = await state.fulltext.search(req.query, limit=req.limit, category=req.category)
+
+    return FulltextSearchResponse(
+        results=[
+            FulltextSearchResult(
+                text=r["text"],
+                source=r.get("source", ""),
+                category=r.get("category", ""),
+                score=r.get("score", 0.0),
+            )
+            for r in results
+        ],
+        count=len(results),
+    )
 
 
 @app.get("/graph/stats", response_model=GraphStatsResponse)

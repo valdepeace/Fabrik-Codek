@@ -1,16 +1,16 @@
 # Docstring Generator Prompt
 
-Genera docstrings de alta calidad en formato Google style para el código proporcionado.
+Generate high-quality docstrings in Google style format for the provided code.
 
-## Reglas
-1. Usar formato Google docstring
-2. Incluir descripción breve en primera línea
-3. Documentar todos los parámetros con tipos
-4. Documentar valor de retorno
-5. Incluir ejemplos si la función es compleja
-6. Documentar excepciones si las hay
+## Rules
+1. Use Google docstring format
+2. Include a brief description on the first line
+3. Document all parameters with types
+4. Document return value
+5. Include examples if the function is complex
+6. Document exceptions if any
 
-## Formato
+## Format
 
 ```python
 def function_name(param1: Type1, param2: Type2) -> ReturnType:
@@ -35,7 +35,7 @@ def function_name(param1: Type1, param2: Type2) -> ReturnType:
     """
 ```
 
-## Instrucciones
-Analiza el código proporcionado y genera docstrings apropiados.
-Si el código ya tiene docstrings, mejóralos si es necesario.
-Mantén el estilo consistente con el resto del proyecto.
+## Instructions
+Analyze the provided code and generate appropriate docstrings.
+If the code already has docstrings, improve them if necessary.
+Keep the style consistent with the rest of the project.

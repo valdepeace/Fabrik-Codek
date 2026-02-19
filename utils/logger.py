@@ -144,8 +144,8 @@ class FabrikLogger:
             min_len = QUALITY_THRESHOLDS["min_reasoning_length"]
             if len(reasoning.strip()) < min_len:
                 errors.append(
-                    f"reasoning debe tener >= {min_len} chars (tiene {len(reasoning.strip())}). "
-                    f"Explica el PORQUÉ de la decisión."
+                    f"reasoning must be >= {min_len} chars (has {len(reasoning.strip())}). "
+                    f"Explain the WHY behind the decision."
                 )
 
         # Validate lesson_learned (required for all training-worthy entries)
@@ -153,8 +153,8 @@ class FabrikLogger:
             min_len = QUALITY_THRESHOLDS["min_lesson_length"]
             if len(lesson_learned.strip()) < min_len:
                 errors.append(
-                    f"lesson_learned debe tener >= {min_len} chars (tiene {len(lesson_learned.strip())}). "
-                    f"¿Qué aprendimos para el futuro?"
+                    f"lesson_learned must be >= {min_len} chars (has {len(lesson_learned.strip())}). "
+                    f"What did we learn for the future?"
                 )
 
         # Validate how_fixed for errors
@@ -162,8 +162,8 @@ class FabrikLogger:
             min_len = QUALITY_THRESHOLDS["min_how_fixed_length"]
             if len(how_fixed.strip()) < min_len:
                 errors.append(
-                    f"how_fixed debe tener >= {min_len} chars (tiene {len(how_fixed.strip())}). "
-                    f"Explica paso a paso cómo se resolvió."
+                    f"how_fixed must be >= {min_len} chars (has {len(how_fixed.strip())}). "
+                    f"Explain step by step how it was resolved."
                 )
 
         # Validate description
@@ -172,15 +172,15 @@ class FabrikLogger:
             actual = description or how_fixed  # error uses how_fixed as main description
             if len(actual.strip()) < min_len:
                 errors.append(
-                    f"description debe tener >= {min_len} chars. "
-                    f"Proporciona contexto suficiente."
+                    f"description must be >= {min_len} chars. "
+                    f"Provide sufficient context."
                 )
 
         if errors:
             error_msg = (
-                f"\n[fabrik-logger] DATOS RECHAZADOS - Calidad insuficiente:\n"
+                f"\n[fabrik-logger] DATA REJECTED - Insufficient quality:\n"
                 + "\n".join(f"  ❌ {e}" for e in errors)
-                + "\n\nLos datos de baja calidad causan alucinaciones en el modelo."
+                + "\n\nLow-quality data causes hallucinations in the model."
             )
             raise QualityValidationError(error_msg)
 
@@ -413,13 +413,13 @@ class FabrikLogger:
         if not was_correct:
             if len(actual_finding.strip()) < 50:
                 raise QualityValidationError(
-                    "actual_finding debe tener >= 50 chars para sugerencias incorrectas. "
-                    "Describe qué encontraste realmente en el código."
+                    "actual_finding must be >= 50 chars for incorrect suggestions. "
+                    "Describe what you actually found in the code."
                 )
             if len(why_wrong.strip()) < 50:
                 raise QualityValidationError(
-                    "why_wrong debe tener >= 50 chars para sugerencias incorrectas. "
-                    "Explica por qué la sugerencia de Fabrik estaba mal."
+                    "why_wrong must be >= 50 chars for incorrect suggestions. "
+                    "Explain why Fabrik's suggestion was wrong."
                 )
 
         entry = {

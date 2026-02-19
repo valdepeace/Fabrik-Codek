@@ -74,7 +74,7 @@ def mock_hybrid():
     return hybrid
 
 
-def _build_app(llm, rag=None, graph=None, hybrid=None, ollama_ok=True, api_key=None):
+def _build_app(llm, rag=None, graph=None, hybrid=None, fulltext=None, ollama_ok=True, api_key=None):
     """Build a FastAPI app with pre-injected state (bypasses lifespan)."""
     import time as _time
 
@@ -84,6 +84,7 @@ def _build_app(llm, rag=None, graph=None, hybrid=None, ollama_ok=True, api_key=N
     from src.interfaces.api import (
         AskResponse,
         ChatResponse,
+        FulltextSearchResponse,
         GraphSearchResponse,
         GraphStatsResponse,
         HealthResponse,
@@ -100,6 +101,7 @@ def _build_app(llm, rag=None, graph=None, hybrid=None, ollama_ok=True, api_key=N
     test_app.state.rag = rag
     test_app.state.graph = graph
     test_app.state.hybrid = hybrid
+    test_app.state.fulltext = fulltext
 
     # API key middleware (if configured)
     if api_key:
@@ -114,6 +116,7 @@ def _build_app(llm, rag=None, graph=None, hybrid=None, ollama_ok=True, api_key=N
     test_app.post("/ask", response_model=AskResponse)(api_module.ask)
     test_app.post("/chat", response_model=ChatResponse)(api_module.chat)
     test_app.post("/search", response_model=SearchResponse)(api_module.search)
+    test_app.post("/fulltext/search", response_model=FulltextSearchResponse)(api_module.fulltext_search)
     test_app.post("/graph/search", response_model=GraphSearchResponse)(api_module.graph_search)
     test_app.get("/graph/stats", response_model=GraphStatsResponse)(api_module.graph_stats)
 
@@ -689,3 +692,53 @@ class TestCORS:
                 )
             assert r.status_code == 200
             assert "access-control-allow-methods" in r.headers
+
+
+# ---------------------------------------------------------------------------
+# TestFulltextSearch
+# ---------------------------------------------------------------------------
+
+
+class TestFulltextSearch:
+    """Tests for POST /fulltext/search endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_returns_results(self, mock_llm):
+        mock_ft = AsyncMock()
+        mock_ft.search = AsyncMock(return_value=[
+            {"text": "keyword match", "source": "s.jsonl", "category": "training",
+             "score": 1.0, "origin": "fulltext"},
+        ])
+        app = _build_app(mock_llm, fulltext=mock_ft)
+        async with _client(app) as c:
+            r = await c.post("/fulltext/search", json={"query": "keyword", "limit": 5})
+        assert r.status_code == 200
+        data = r.json()
+        assert data["count"] == 1
+        assert data["results"][0]["text"] == "keyword match"
+        assert data["results"][0]["origin"] == "fulltext"
+
+    @pytest.mark.asyncio
+    async def test_unavailable_returns_empty(self, mock_llm):
+        app = _build_app(mock_llm, fulltext=None)
+        async with _client(app) as c:
+            r = await c.post("/fulltext/search", json={"query": "anything"})
+        assert r.status_code == 200
+        assert r.json()["count"] == 0
+
+    @pytest.mark.asyncio
+    async def test_with_category_filter(self, mock_llm):
+        mock_ft = AsyncMock()
+        mock_ft.search = AsyncMock(return_value=[])
+        app = _build_app(mock_llm, fulltext=mock_ft)
+        async with _client(app) as c:
+            r = await c.post("/fulltext/search", json={"query": "test", "category": "training"})
+        assert r.status_code == 200
+        mock_ft.search.assert_called_once_with("test", limit=5, category="training")
+
+    @pytest.mark.asyncio
+    async def test_empty_query_rejected(self, mock_llm):
+        app = _build_app(mock_llm)
+        async with _client(app) as c:
+            r = await c.post("/fulltext/search", json={"query": ""})
+        assert r.status_code == 422

@@ -61,7 +61,23 @@ async def lifespan(server: FastMCP):
         logger.warning("mcp_graph_init_failed", error=str(exc))
         _state["graph"] = None
 
-    # 5. Hybrid RAG
+    # 4b. Full-text engine (Meilisearch) - optional
+    try:
+        from src.knowledge.fulltext_engine import FullTextEngine
+
+        ft = FullTextEngine()
+        if await ft.health_check():
+            await ft.ensure_index()
+            _state["fulltext"] = ft
+        else:
+            await ft.close()
+            _state["fulltext"] = None
+            logger.info("mcp_fulltext_unavailable", msg="Meilisearch not running, skipping")
+    except Exception as exc:
+        logger.warning("mcp_fulltext_init_failed", error=str(exc))
+        _state["fulltext"] = None
+
+    # 5. Hybrid RAG (vector + graph + optional fulltext)
     if _state.get("rag") is not None:
         try:
             from src.knowledge.hybrid_rag import HybridRAGEngine
@@ -69,6 +85,8 @@ async def lifespan(server: FastMCP):
             hybrid = HybridRAGEngine(
                 rag_engine=_state["rag"],
                 graph_engine=_state["graph"],
+                fulltext_engine=_state.get("fulltext"),
+                fulltext_weight=settings.fulltext_weight,
             )
             hybrid._owns_rag = False
             _state["hybrid"] = hybrid
@@ -83,11 +101,14 @@ async def lifespan(server: FastMCP):
         ollama=_state.get("ollama_ok"),
         rag=_state.get("rag") is not None,
         graph=_state.get("graph") is not None,
+        fulltext=_state.get("fulltext") is not None,
     )
 
     yield
 
     # Shutdown
+    if _state.get("fulltext"):
+        await _state["fulltext"].close()
     if _state.get("rag"):
         await _state["rag"].close()
     await llm.__aexit__(None, None, None)
@@ -132,6 +153,7 @@ async def fabrik_status() -> str:
         "ollama": "ok" if ollama_ok else "unavailable",
         "rag": "ok" if _state.get("rag") is not None else "unavailable",
         "graph": "ok" if _state.get("graph") is not None else "unavailable",
+        "fulltext": "ok" if _state.get("fulltext") is not None else "unavailable",
         "model": settings.default_model,
         "datalake": "ok" if settings.datalake_path.exists() else "unavailable",
         "version": __version__,
@@ -351,6 +373,45 @@ async def fabrik_graph_stats() -> str:
         "entity_types": stats["entity_types"],
         "relation_types": stats["relation_types"],
     })
+
+
+@mcp.tool(
+    name="fabrik_fulltext_search",
+    description=(
+        "Full-text keyword search in the knowledge base via Meilisearch. "
+        "Best for exact matches: error messages, function names, config keys. "
+        "Complements semantic vector search (fabrik_search) for precision queries."
+    ),
+)
+async def fabrik_fulltext_search(
+    query: str, limit: int = 5, category: str | None = None,
+) -> str:
+    """Full-text search using Meilisearch."""
+    limit = max(1, min(limit, 50))
+
+    fulltext = _state.get("fulltext")
+    if fulltext is None:
+        return json.dumps({"results": [], "count": 0, "error": "Full-text engine not available"})
+
+    try:
+        results = await fulltext.search(query, limit=limit, category=category)
+    except Exception as exc:
+        return json.dumps({"results": [], "count": 0, "error": str(exc)})
+
+    output = {
+        "results": [
+            {
+                "text": r.get("text", ""),
+                "source": r.get("source", ""),
+                "category": r.get("category", ""),
+                "score": r.get("score", 0.0),
+                "origin": "fulltext",
+            }
+            for r in results
+        ],
+        "count": len(results),
+    }
+    return json.dumps(output)
 
 
 # ---------------------------------------------------------------------------

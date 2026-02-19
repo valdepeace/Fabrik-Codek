@@ -248,7 +248,7 @@ class TestHybridRetrieval:
             graph_engine=graph_engine,
         )
         prompt = await hybrid.query_with_context("How to use FastAPI?")
-        assert "Pregunta:" in prompt
+        assert "Question:" in prompt
         assert "FastAPI" in prompt or "fastapi" in prompt.lower()
 
     @pytest.mark.asyncio
@@ -297,3 +297,172 @@ class TestEdgeCases:
         )
         fused = hybrid._rrf_fusion([], [])
         assert fused == []
+
+
+# --- Three-Tier RRF (Vector + Graph + Fulltext) ---
+
+
+class TestThreeTierRRF:
+    """Verify RRF fusion works with three sources: vector + graph + fulltext."""
+
+    def test_rrf_with_fulltext_results(self, graph_engine, mock_rag_engine):
+        """Full-text results contribute to fusion score."""
+        engine = HybridRAGEngine(
+            rag_engine=mock_rag_engine,
+            graph_engine=graph_engine,
+            vector_weight=0.4,
+            graph_weight=0.3,
+            fulltext_weight=0.3,
+        )
+
+        vector_results = [
+            {"text": "FastAPI uses Pydantic for validation", "source": "a", "category": "training", "score": 0.9},
+        ]
+        graph_results = [
+            {"text": "FastAPI uses Pydantic for validation", "source": "a", "category": "training",
+             "score": 0.8, "origin": "graph"},
+        ]
+        fulltext_results = [
+            {"text": "FastAPI uses Pydantic for validation", "source": "a", "category": "training",
+             "score": 1.0, "origin": "fulltext"},
+        ]
+
+        fused = engine._rrf_fusion(vector_results, graph_results, fulltext_results, limit=5)
+        assert len(fused) == 1
+        assert fused[0]["origin"] == "hybrid"
+        assert fused[0]["score"] > 0
+
+    def test_rrf_fulltext_only_results(self, graph_engine, mock_rag_engine):
+        """Results only in fulltext still appear."""
+        engine = HybridRAGEngine(
+            rag_engine=mock_rag_engine,
+            graph_engine=graph_engine,
+            fulltext_weight=0.3,
+        )
+
+        fulltext_results = [
+            {"text": "exact error match", "source": "err", "category": "learning",
+             "score": 1.0, "origin": "fulltext"},
+        ]
+
+        fused = engine._rrf_fusion([], [], fulltext_results, limit=5)
+        assert len(fused) == 1
+        assert fused[0]["origin"] == "fulltext"
+
+    def test_rrf_no_fulltext_weight_disables(self, graph_engine, mock_rag_engine):
+        """When fulltext_weight=0, fulltext results don't contribute."""
+        engine = HybridRAGEngine(
+            rag_engine=mock_rag_engine,
+            graph_engine=graph_engine,
+            fulltext_weight=0.0,
+        )
+
+        fulltext_results = [
+            {"text": "should not appear", "source": "x", "category": "x",
+             "score": 1.0, "origin": "fulltext"},
+        ]
+
+        fused = engine._rrf_fusion([], [], fulltext_results, limit=5)
+        assert len(fused) == 0
+
+    def test_rrf_three_sources_ranking(self, graph_engine, mock_rag_engine):
+        """Document in 3 sources ranks higher than in 2 or 1."""
+        engine = HybridRAGEngine(
+            rag_engine=mock_rag_engine,
+            graph_engine=graph_engine,
+            vector_weight=0.34,
+            graph_weight=0.33,
+            fulltext_weight=0.33,
+        )
+
+        vector = [
+            {"text": "in all three", "source": "a", "category": "c", "score": 0.9},
+            {"text": "vector only", "source": "b", "category": "c", "score": 0.8},
+        ]
+        graph = [
+            {"text": "in all three", "source": "a", "category": "c", "score": 0.8, "origin": "graph"},
+        ]
+        fulltext = [
+            {"text": "in all three", "source": "a", "category": "c", "score": 1.0, "origin": "fulltext"},
+            {"text": "fulltext only", "source": "d", "category": "c", "score": 1.0, "origin": "fulltext"},
+        ]
+
+        fused = engine._rrf_fusion(vector, graph, fulltext, limit=5)
+        assert fused[0]["text"] == "in all three"
+        assert fused[0]["origin"] == "hybrid"
+
+    def test_rrf_backward_compatible_two_args(self, graph_engine, mock_rag_engine):
+        """Calling _rrf_fusion with 2 args still works (backward compatible)."""
+        engine = HybridRAGEngine(
+            rag_engine=mock_rag_engine,
+            graph_engine=graph_engine,
+        )
+
+        vector = [{"text": "result", "source": "f", "category": "c", "score": 0.9}]
+        fused = engine._rrf_fusion(vector, [])
+        assert len(fused) == 1
+
+
+class TestHybridRetrieveWithFullText:
+    """Verify retrieve() includes fulltext results when engine is available."""
+
+    @pytest.mark.asyncio
+    async def test_retrieve_with_fulltext_engine(self, graph_engine):
+        mock_rag = MagicMock()
+        mock_rag.retrieve = AsyncMock(return_value=[
+            {"text": "vector result", "source": "v", "category": "training", "score": 0.9},
+        ])
+
+        mock_fulltext = AsyncMock()
+        mock_fulltext.search = AsyncMock(return_value=[
+            {"text": "fulltext result", "source": "f", "category": "training",
+             "score": 1.0, "origin": "fulltext"},
+        ])
+
+        engine = HybridRAGEngine(
+            rag_engine=mock_rag,
+            graph_engine=graph_engine,
+            fulltext_engine=mock_fulltext,
+            fulltext_weight=0.3,
+        )
+
+        results = await engine.retrieve("test query", limit=5)
+        assert len(results) >= 1
+        mock_fulltext.search.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_retrieve_without_fulltext_engine(self, graph_engine):
+        """When no fulltext engine, works as before (vector + graph only)."""
+        mock_rag = MagicMock()
+        mock_rag.retrieve = AsyncMock(return_value=[
+            {"text": "vector result", "source": "v", "category": "training", "score": 0.9},
+        ])
+
+        engine = HybridRAGEngine(
+            rag_engine=mock_rag,
+            graph_engine=graph_engine,
+        )
+
+        results = await engine.retrieve("test query", limit=5)
+        assert len(results) >= 1
+
+    @pytest.mark.asyncio
+    async def test_fulltext_failure_doesnt_break_retrieve(self, graph_engine):
+        """If fulltext engine throws, retrieve still returns vector+graph results."""
+        mock_rag = MagicMock()
+        mock_rag.retrieve = AsyncMock(return_value=[
+            {"text": "vector result", "source": "v", "category": "training", "score": 0.9},
+        ])
+
+        mock_fulltext = AsyncMock()
+        mock_fulltext.search = AsyncMock(side_effect=Exception("Meilisearch down"))
+
+        engine = HybridRAGEngine(
+            rag_engine=mock_rag,
+            graph_engine=graph_engine,
+            fulltext_engine=mock_fulltext,
+            fulltext_weight=0.3,
+        )
+
+        results = await engine.retrieve("test query", limit=5)
+        assert len(results) >= 1

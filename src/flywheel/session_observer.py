@@ -1,12 +1,12 @@
-"""Session Observer - Aprende de las conversaciones con Claude Code.
+"""Session Observer - Learn from conversations with Claude Code.
 
-Este módulo procesa los transcripts de Claude Code y extrae
-training pairs para que fabrik-codek aprenda de cómo Claude
-resuelve problemas.
+This module processes Claude Code transcripts and extracts
+training pairs so fabrik-codek can learn from how Claude
+solves problems.
 
-Uso:
+Usage:
     python -m src.flywheel.session_observer process
-    python -m src.flywheel.session_observer watch  # Modo continuo
+    python -m src.flywheel.session_observer watch  # Continuous mode
 """
 
 import json
@@ -16,7 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterator
 
-# Rutas de Claude Code
+# Claude Code paths
 CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
 DATALAKE_PATH = Path(os.environ.get("FABRIK_DATALAKE_PATH", Path(__file__).parent.parent.parent / "data"))
 SESSIONS_OUTPUT = DATALAKE_PATH / "01-raw" / "sessions"

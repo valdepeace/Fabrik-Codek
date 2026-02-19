@@ -83,19 +83,19 @@ class TestStatus:
         result = self._run_status()
         assert result.exit_code == 0
         assert "Fabrik-Codek Status" in result.output
-        assert "Ollama conectado" in result.output
+        assert "Ollama connected" in result.output
 
     def test_status_graph_not_built(self):
         """Status shows graph not built when load() returns False."""
         result = self._run_status(graph_loaded=False)
         assert result.exit_code == 0
-        assert "No construido" in result.output
+        assert "Not built" in result.output
 
     def test_status_ollama_down(self):
         """Status reports Ollama unavailable."""
         result = self._run_status(ollama_ok=False)
         assert result.exit_code == 0
-        assert "Ollama no disponible" in result.output
+        assert "Ollama unavailable" in result.output
 
     def test_status_datalake_missing(self):
         """Status shows datalake missing when path does not exist."""
@@ -141,7 +141,7 @@ class TestModels:
             result = runner.invoke(app, ["models"])
 
         assert result.exit_code == 0
-        assert "Ollama no disponible" in result.output
+        assert "Ollama unavailable" in result.output
 
     def test_models_empty_list(self):
         """models command handles empty model list gracefully."""
@@ -154,7 +154,7 @@ class TestModels:
             result = runner.invoke(app, ["models"])
 
         assert result.exit_code == 0
-        assert "Modelo" in result.output
+        assert "Model" in result.output
 
 
 # ===================================================================
@@ -194,7 +194,7 @@ class TestGraph:
             result = runner.invoke(app, ["graph", "stats"])
 
         assert result.exit_code == 0
-        assert "No hay Knowledge Graph" in result.output
+        assert "No Knowledge Graph built" in result.output
 
     def test_graph_build_success(self):
         """graph build runs pipeline and shows results."""
@@ -261,7 +261,7 @@ class TestGraph:
             result = runner.invoke(app, ["graph", "search", "-q", "nonexistent"])
 
         assert result.exit_code == 0
-        assert "No se encontraron" in result.output
+        assert "No entities found" in result.output
 
     def test_graph_complete_success(self):
         """graph complete runs inference and saves."""
@@ -290,7 +290,7 @@ class TestGraph:
             result = runner.invoke(app, ["graph", "complete"])
 
         assert result.exit_code == 0
-        assert "No hay Knowledge Graph" in result.output
+        assert "No Knowledge Graph built" in result.output
 
     def test_graph_prune_dry_run(self):
         """graph prune --dry-run previews without modifying."""
@@ -351,7 +351,7 @@ class TestGraph:
             result = runner.invoke(app, ["graph", "prune"])
 
         assert result.exit_code == 0
-        assert "No hay Knowledge Graph" in result.output
+        assert "No Knowledge Graph built" in result.output
 
     def test_graph_prune_with_custom_thresholds(self):
         """graph prune passes custom thresholds to engine."""
@@ -470,7 +470,7 @@ class TestLearn:
             result = runner.invoke(app, ["learn", "reset"])
 
         assert result.exit_code == 0
-        assert "Reset completo" in result.output
+        assert "Reset complete" in result.output
         mock_marker.unlink.assert_called_once()
 
     def test_learn_reset_nothing_to_reset(self):
@@ -485,7 +485,7 @@ class TestLearn:
             result = runner.invoke(app, ["learn", "reset"])
 
         assert result.exit_code == 0
-        assert "Nada que resetear" in result.output
+        assert "Nothing to reset" in result.output
 
 
 # ===================================================================
@@ -542,7 +542,7 @@ class TestRag:
             result = runner.invoke(app, ["rag", "search", "-q", "timeout"])
 
         assert result.exit_code == 0
-        assert "Resultados para" in result.output
+        assert "Results for" in result.output
         assert "0.951" in result.output
         assert "Fix timeout error" in result.output
 
@@ -598,7 +598,7 @@ class TestDatalake:
 
         assert result.exit_code == 0
         assert "agents" in result.output
-        assert "1 encontrado" in result.output
+        assert "1 found" in result.output
 
     def test_datalake_decisions(self):
         """datalake decisions shows technical decisions."""
@@ -612,7 +612,7 @@ class TestDatalake:
             result = runner.invoke(app, ["datalake", "decisions"])
 
         assert result.exit_code == 0
-        assert "Decisiones" in result.output
+        assert "Technical decisions" in result.output
 
     def test_datalake_learnings(self):
         """datalake learnings shows learning entries."""
@@ -674,7 +674,7 @@ class TestFlywheel:
             result = runner.invoke(app, ["flywheel", "export"])
 
         assert result.exit_code == 0
-        assert "Exportado" in result.output or "training_export" in result.output
+        assert "Exported to" in result.output or "training_export" in result.output
 
     def test_flywheel_flush(self):
         """flywheel flush clears the buffer."""
@@ -685,7 +685,7 @@ class TestFlywheel:
             result = runner.invoke(app, ["flywheel", "flush"])
 
         assert result.exit_code == 0
-        assert "Buffer vaciado" in result.output
+        assert "Buffer flushed" in result.output
 
 
 # ===================================================================
@@ -795,7 +795,7 @@ class TestFinetune:
         assert result.exit_code == 0
         assert "Fine-tuning Data" in result.output
         assert "5000" in result.output
-        assert "sin --dry-run" in result.output
+        assert "without --dry-run" in result.output
 
     def test_finetune_dry_run_with_options(self):
         """finetune --dry-run shows configured epochs and batch."""
@@ -940,3 +940,79 @@ class TestMCP:
         result = runner.invoke(app, ["mcp", "--help"])
         assert result.exit_code == 0
         assert "transport" in result.output.lower() or "stdio" in result.output.lower()
+
+
+# ===================================================================
+# TestFulltext
+# ===================================================================
+
+class TestFulltext:
+    """Tests for the ``fulltext`` command."""
+
+    def test_fulltext_help(self):
+        """fulltext --help shows description."""
+        result = runner.invoke(app, ["fulltext", "--help"])
+        assert result.exit_code == 0
+        assert "meilisearch" in result.output.lower() or "full-text" in result.output.lower()
+
+    def test_fulltext_status_unavailable(self):
+        """fulltext status when Meilisearch is not running."""
+        mock_ft = MagicMock()
+        mock_ft.health_check = AsyncMock(return_value=False)
+        mock_ft.close = AsyncMock()
+        mock_ft.__aenter__ = AsyncMock(return_value=mock_ft)
+        mock_ft.__aexit__ = AsyncMock(return_value=None)
+        mock_ft._url = "http://localhost:7700"
+
+        with patch("src.knowledge.fulltext_engine.FullTextEngine", return_value=mock_ft):
+            result = runner.invoke(app, ["fulltext", "status"])
+        assert result.exit_code == 0
+        assert "unavailable" in result.output.lower()
+
+    def test_fulltext_status_connected(self):
+        """fulltext status when Meilisearch is available."""
+        mock_ft = MagicMock()
+        mock_ft.health_check = AsyncMock(return_value=True)
+        mock_ft.get_stats = AsyncMock(return_value={"document_count": 100, "is_indexing": False})
+        mock_ft.close = AsyncMock()
+        mock_ft.__aenter__ = AsyncMock(return_value=mock_ft)
+        mock_ft.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("src.knowledge.fulltext_engine.FullTextEngine", return_value=mock_ft):
+            result = runner.invoke(app, ["fulltext", "status"])
+        assert result.exit_code == 0
+        assert "connected" in result.output.lower()
+        assert "100" in result.output
+
+    def test_fulltext_search_requires_query(self):
+        """fulltext search without --query fails."""
+        mock_ft = MagicMock()
+        mock_ft.health_check = AsyncMock(return_value=True)
+        mock_ft.close = AsyncMock()
+        mock_ft.__aenter__ = AsyncMock(return_value=mock_ft)
+        mock_ft.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("src.knowledge.fulltext_engine.FullTextEngine", return_value=mock_ft):
+            result = runner.invoke(app, ["fulltext", "search"])
+        assert result.exit_code != 0
+
+    def test_fulltext_search_with_results(self):
+        """fulltext search returns results."""
+        mock_ft = MagicMock()
+        mock_ft.health_check = AsyncMock(return_value=True)
+        mock_ft.search = AsyncMock(return_value=[
+            {"text": "match here", "source": "s.jsonl", "category": "training", "score": 1.0, "origin": "fulltext"},
+        ])
+        mock_ft.close = AsyncMock()
+        mock_ft.__aenter__ = AsyncMock(return_value=mock_ft)
+        mock_ft.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("src.knowledge.fulltext_engine.FullTextEngine", return_value=mock_ft):
+            result = runner.invoke(app, ["fulltext", "search", "--query", "test"])
+        assert result.exit_code == 0
+        assert "match here" in result.output
+
+    def test_fulltext_unknown_action(self):
+        """fulltext with unknown action fails."""
+        result = runner.invoke(app, ["fulltext", "unknown"])
+        assert result.exit_code != 0

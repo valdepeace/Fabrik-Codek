@@ -93,6 +93,7 @@ def inject_state(mock_llm, mock_rag, mock_graph, mock_hybrid):
     mcp_server._state["rag"] = mock_rag
     mcp_server._state["graph"] = mock_graph
     mcp_server._state["hybrid"] = mock_hybrid
+    mcp_server._state["fulltext"] = None  # Default: not available
     yield
     mcp_server._state.clear()
 
@@ -561,3 +562,114 @@ class TestOutputFormat:
 
         assert isinstance(result, str)
         json.loads(result)
+
+    @pytest.mark.asyncio
+    async def test_fulltext_search_returns_json_string(self):
+        from src.interfaces.mcp_server import _state, fabrik_fulltext_search
+
+        mock_ft = AsyncMock()
+        mock_ft.search = AsyncMock(return_value=[
+            {"text": "match", "source": "s", "category": "c", "score": 1.0, "origin": "fulltext"},
+        ])
+        _state["fulltext"] = mock_ft
+        result = await fabrik_fulltext_search(query="test")
+
+        assert isinstance(result, str)
+        json.loads(result)
+
+
+# ---------------------------------------------------------------------------
+# TestFabrikFulltextSearch
+# ---------------------------------------------------------------------------
+
+
+class TestFabrikFulltextSearch:
+    """Test fabrik_fulltext_search MCP tool."""
+
+    @pytest.mark.asyncio
+    async def test_returns_results(self):
+        from src.interfaces.mcp_server import _state, fabrik_fulltext_search
+
+        mock_ft = AsyncMock()
+        mock_ft.search = AsyncMock(return_value=[
+            {"text": "exact match result", "source": "training.jsonl",
+             "category": "training", "score": 1.0, "origin": "fulltext"},
+        ])
+        _state["fulltext"] = mock_ft
+
+        result = await fabrik_fulltext_search("exact error message", limit=5)
+        data = json.loads(result)
+        assert data["count"] == 1
+        assert data["results"][0]["text"] == "exact match result"
+        assert data["results"][0]["origin"] == "fulltext"
+
+    @pytest.mark.asyncio
+    async def test_unavailable_returns_error(self):
+        from src.interfaces.mcp_server import _state, fabrik_fulltext_search
+
+        _state["fulltext"] = None
+
+        result = await fabrik_fulltext_search("query")
+        data = json.loads(result)
+        assert data["count"] == 0
+        assert "error" in data
+
+    @pytest.mark.asyncio
+    async def test_clamps_limit(self):
+        from src.interfaces.mcp_server import _state, fabrik_fulltext_search
+
+        mock_ft = AsyncMock()
+        mock_ft.search = AsyncMock(return_value=[])
+        _state["fulltext"] = mock_ft
+
+        await fabrik_fulltext_search("query", limit=100)
+        mock_ft.search.assert_called_once_with("query", limit=50, category=None)
+
+    @pytest.mark.asyncio
+    async def test_with_category(self):
+        from src.interfaces.mcp_server import _state, fabrik_fulltext_search
+
+        mock_ft = AsyncMock()
+        mock_ft.search = AsyncMock(return_value=[])
+        _state["fulltext"] = mock_ft
+
+        await fabrik_fulltext_search("query", category="training")
+        mock_ft.search.assert_called_once_with("query", limit=5, category="training")
+
+    @pytest.mark.asyncio
+    async def test_handles_exception(self):
+        from src.interfaces.mcp_server import _state, fabrik_fulltext_search
+
+        mock_ft = AsyncMock()
+        mock_ft.search = AsyncMock(side_effect=Exception("connection lost"))
+        _state["fulltext"] = mock_ft
+
+        result = await fabrik_fulltext_search("query")
+        data = json.loads(result)
+        assert data["count"] == 0
+        assert "error" in data
+
+
+# ---------------------------------------------------------------------------
+# TestFabrikStatusIncludesFulltext
+# ---------------------------------------------------------------------------
+
+
+class TestFabrikStatusIncludesFulltext:
+    """Verify status tool reports fulltext availability."""
+
+    @pytest.mark.asyncio
+    async def test_status_shows_fulltext_unavailable(self):
+        from src.interfaces.mcp_server import _state, fabrik_status
+
+        _state["fulltext"] = None
+        result = json.loads(await fabrik_status())
+        assert result["fulltext"] == "unavailable"
+
+    @pytest.mark.asyncio
+    async def test_status_shows_fulltext_ok(self):
+        from src.interfaces.mcp_server import _state, fabrik_status
+
+        _state["fulltext"] = AsyncMock()  # Not None = available
+        result = json.loads(await fabrik_status())
+        assert result["fulltext"] == "ok"

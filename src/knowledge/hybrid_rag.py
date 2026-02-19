@@ -1,6 +1,7 @@
 """Hybrid RAG Engine - Combines vector search (LanceDB) with graph traversal (NetworkX).
 
-Uses Reciprocal Rank Fusion (RRF) to merge results from both sources.
+Uses Reciprocal Rank Fusion (RRF) to merge results from multiple sources.
+Supports three retrieval tiers: vector (semantic), graph (relational), fulltext (keyword).
 """
 
 import re
@@ -17,28 +18,34 @@ logger = structlog.get_logger()
 # Default RRF parameters
 DEFAULT_VECTOR_WEIGHT = 0.6
 DEFAULT_GRAPH_WEIGHT = 0.4
+DEFAULT_FULLTEXT_WEIGHT = 0.0
 DEFAULT_RRF_K = 60
 DEFAULT_GRAPH_DEPTH = 2
 DEFAULT_MIN_WEIGHT = 0.3
 
 
 class HybridRAGEngine:
-    """Hybrid retrieval engine composing RAGEngine (vector) and GraphEngine (graph).
+    """Hybrid retrieval engine composing RAGEngine (vector), GraphEngine (graph),
+    and optionally FullTextEngine (keyword).
 
-    Does NOT modify RAGEngine. Uses composition to combine both retrieval methods.
+    Does NOT modify any sub-engine. Uses composition to combine retrieval methods.
     """
 
     def __init__(
         self,
         rag_engine: RAGEngine | None = None,
         graph_engine: GraphEngine | None = None,
+        fulltext_engine=None,
         vector_weight: float = DEFAULT_VECTOR_WEIGHT,
         graph_weight: float = DEFAULT_GRAPH_WEIGHT,
+        fulltext_weight: float = DEFAULT_FULLTEXT_WEIGHT,
     ):
         self._rag = rag_engine
         self._graph = graph_engine
+        self._fulltext = fulltext_engine
         self.vector_weight = vector_weight
         self.graph_weight = graph_weight
+        self.fulltext_weight = fulltext_weight
         self._owns_rag = rag_engine is None
 
     async def __aenter__(self):
@@ -61,7 +68,7 @@ class HybridRAGEngine:
         graph_depth: int = DEFAULT_GRAPH_DEPTH,
         min_weight: float = DEFAULT_MIN_WEIGHT,
     ) -> list[dict]:
-        """Hybrid retrieval using RRF fusion of vector and graph results.
+        """Hybrid retrieval using RRF fusion of vector, graph, and fulltext results.
 
         Args:
             query: Search query string.
@@ -82,10 +89,18 @@ class HybridRAGEngine:
             query, limit=limit * 2, depth=graph_depth, min_weight=min_weight,
         )
 
-        # 3. RRF fusion
-        fused = self._rrf_fusion(vector_results, graph_results, limit=limit)
+        # 3. Full-text search (when available and weighted)
+        fulltext_results = []
+        if self._fulltext and self.fulltext_weight > 0:
+            try:
+                fulltext_results = await self._fulltext.search(query, limit=limit * 2)
+            except Exception as exc:
+                logger.debug("fulltext_retrieve_failed", error=str(exc))
 
-        # 4. Enrich with graph context paths
+        # 4. RRF fusion (three sources)
+        fused = self._rrf_fusion(vector_results, graph_results, fulltext_results, limit=limit)
+
+        # 5. Enrich with graph context paths
         entity_ids = self._recognize_entities(query)
         if entity_ids:
             context_paths = self._graph.get_context_paths(entity_ids, max_paths=3)
@@ -97,6 +112,7 @@ class HybridRAGEngine:
             "hybrid_retrieve_done",
             vector_count=len(vector_results),
             graph_count=len(graph_results),
+            fulltext_count=len(fulltext_results),
             fused_count=len(fused),
             entities_recognized=len(entity_ids),
         )
@@ -175,22 +191,27 @@ class HybridRAGEngine:
         self,
         vector_results: list[dict],
         graph_results: list[dict],
+        fulltext_results: list[dict] | None = None,
         limit: int = 5,
     ) -> list[dict]:
-        """Reciprocal Rank Fusion of two result sets.
+        """Reciprocal Rank Fusion of two or three result sets.
 
-        score(d) = vector_weight/(k + rank_vector) + graph_weight/(k + rank_graph)
+        score(d) = Σ weight_i / (k + rank_i)  for each source where d appears.
         """
         k = DEFAULT_RRF_K
         scores: dict[str, float] = {}
         result_map: dict[str, dict] = {}
+        sources_seen: dict[str, set[str]] = {}
 
         # Score vector results
         for rank, r in enumerate(vector_results):
-            key = r["text"][:100]  # Dedup key
+            key = r["text"][:100]
             scores[key] = scores.get(key, 0) + self.vector_weight / (k + rank)
             if key not in result_map:
                 result_map[key] = {**r, "origin": r.get("origin", "vector")}
+                sources_seen[key] = {"vector"}
+            else:
+                sources_seen[key].add("vector")
 
         # Score graph results
         for rank, r in enumerate(graph_results):
@@ -198,7 +219,24 @@ class HybridRAGEngine:
             scores[key] = scores.get(key, 0) + self.graph_weight / (k + rank)
             if key not in result_map:
                 result_map[key] = {**r, "origin": "graph"}
-            elif result_map[key].get("origin") == "vector":
+                sources_seen[key] = {"graph"}
+            else:
+                sources_seen[key].add("graph")
+
+        # Score fulltext results (when present and weighted)
+        if fulltext_results and self.fulltext_weight > 0:
+            for rank, r in enumerate(fulltext_results):
+                key = r["text"][:100]
+                scores[key] = scores.get(key, 0) + self.fulltext_weight / (k + rank)
+                if key not in result_map:
+                    result_map[key] = {**r, "origin": "fulltext"}
+                    sources_seen[key] = {"fulltext"}
+                else:
+                    sources_seen[key].add("fulltext")
+
+        # Mark multi-source results as "hybrid"
+        for key, srcs in sources_seen.items():
+            if len(srcs) > 1 and key in result_map:
                 result_map[key]["origin"] = "hybrid"
 
         # Sort by fused score
@@ -234,14 +272,14 @@ class HybridRAGEngine:
         # Add graph relationship paths if available
         graph_paths = results[0].get("graph_context", []) if results else []
         if graph_paths:
-            context_parts.append("\nRelaciones conocidas:\n" + "\n".join(f"- {p}" for p in graph_paths))
+            context_parts.append("\nKnown relations:\n" + "\n".join(f"- {p}" for p in graph_paths))
 
         context = "\n---\n".join(context_parts)
 
-        return f"""Contexto de tu base de conocimiento (vector + grafo):
+        return f"""Context from your knowledge base (vector + graph):
 {context}
 
 ---
-Pregunta: {query}
+Question: {query}
 
-Responde usando el contexto cuando sea relevante."""
+Answer using the context when relevant."""

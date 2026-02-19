@@ -1,15 +1,15 @@
 """RAG System - Retrieval Augmented Generation for fabrik-codek.
 
-Este módulo permite a fabrik-codek consultar el conocimiento acumulado
-en el datalake para dar respuestas contextualizadas.
+This module enables fabrik-codek to query accumulated knowledge
+from the datalake to provide context-aware responses.
 
-Uso:
+Usage:
     from src.knowledge.rag import RAGEngine
 
     rag = RAGEngine()
-    await rag.index_datalake()  # Indexar documentos
+    await rag.index_datalake()  # Index documents
 
-    context = await rag.retrieve("cómo hacer autenticación JWT")
+    context = await rag.retrieve("how to do JWT authentication")
     response = await llm.generate(prompt, context=context)
 """
 
@@ -31,18 +31,18 @@ EMBEDDING_DIM = settings.embedding_dim
 
 
 class Document(LanceModel):
-    """Documento indexado en la base vectorial."""
+    """Document indexed in the vector database."""
     id: str
     text: str
     vector: Vector(EMBEDDING_DIM)
-    source: str  # Archivo origen
-    category: str  # Tipo de documento
-    project: str  # Proyecto relacionado
+    source: str  # Source file
+    category: str  # Document type
+    project: str  # Related project
     created_at: str
 
 
 class RAGEngine:
-    """Motor RAG para búsqueda semántica en el datalake."""
+    """RAG engine for semantic search over the datalake."""
 
     def __init__(
         self,
@@ -326,13 +326,13 @@ class RAGEngine:
 
         context = "\n---\n".join(context_parts)
 
-        return f"""Contexto relevante de tu base de conocimiento:
+        return f"""Relevant context from your knowledge base:
 {context}
 
 ---
-Pregunta: {query}
+Question: {query}
 
-Responde usando el contexto anterior cuando sea relevante."""
+Answer using the context above when relevant."""
 
     def get_stats(self) -> dict:
         """Get index statistics."""

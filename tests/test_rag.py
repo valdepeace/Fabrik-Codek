@@ -938,10 +938,10 @@ class TestQueryWithContext:
                     {"text": "Context about FastAPI", "category": "api", "score": 0.1, "source": "f"},
                 ])
                 result = await engine.query_with_context("How to use FastAPI?")
-                assert "Contexto relevante" in result
+                assert "Relevant context" in result
                 assert "Context about FastAPI" in result
                 assert "How to use FastAPI?" in result
-                assert "Pregunta:" in result
+                assert "Question:" in result
             asyncio.run(_run())
         _test()
 
@@ -983,7 +983,7 @@ class TestQueryWithContext:
                 result = await engine.query_with_context("test")
                 # Text should be truncated to 500 chars in context
                 # Count the A's in the result - should be at most 500
-                context_section = result.split("Pregunta:")[0]
+                context_section = result.split("Question:")[0]
                 a_count = context_section.count("A")
                 assert a_count == 500
             asyncio.run(_run())

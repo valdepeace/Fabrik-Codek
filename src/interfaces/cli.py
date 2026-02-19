@@ -39,11 +39,11 @@ def chat(
 
     console.print(
         Panel.fit(
-            "[bold blue]Fabrik-Codek[/bold blue] - Tu hermano pequeño está listo 🤖",
+            "[bold blue]Fabrik-Codek[/bold blue] - Your little brother is ready",
             subtitle=f"Model: {model or settings.default_model}",
         )
     )
-    console.print("[dim]Escribe 'exit' o 'quit' para salir, 'clear' para limpiar[/dim]\n")
+    console.print("[dim]Type 'exit' or 'quit' to leave, 'clear' to reset[/dim]\n")
 
     history_file = settings.data_dir / ".chat_history"
     session = PromptSession(history=FileHistory(str(history_file)))
@@ -57,8 +57,8 @@ def chat(
         async with LLMClient(model=model) as client:
             # Check health
             if not await client.health_check():
-                console.print("[red]Error: Ollama no está disponible[/red]")
-                console.print("[dim]Ejecuta: ollama serve[/dim]")
+                console.print("[red]Error: Ollama is not available[/red]")
+                console.print("[dim]Run: ollama serve[/dim]")
                 return
 
             while True:
@@ -88,7 +88,7 @@ def chat(
                     console=console,
                     transient=True,
                 ) as progress:
-                    progress.add_task("Pensando...", total=None)
+                    progress.add_task("Thinking...", total=None)
                     response = await client.chat(messages)
 
                 messages.append({"role": "assistant", "content": response.content})
@@ -109,7 +109,7 @@ def chat(
         await collector.close()
 
     async_run(run_chat())
-    console.print("\n[dim]¡Hasta luego! 👋[/dim]")
+    console.print("\n[dim]Goodbye![/dim]")
 
 
 @app.command()
@@ -161,15 +161,15 @@ def ask(
                         f"[{r['category']}] {r['text'][:500]}"
                         for r in rag_results
                     ])
-                    final_prompt = f"""Contexto de tu base de conocimiento:
+                    final_prompt = f"""Context from your knowledge base:
 {rag_context}
 
 ---
-Pregunta: {prompt}
+Question: {prompt}
 
-Responde usando el contexto cuando sea relevante."""
+Answer using the context when relevant."""
                     context = rag_context
-                    console.print(f"[dim]RAG: {len(rag_results)} documentos relevantes encontrados[/dim]\n")
+                    console.print(f"[dim]RAG: {len(rag_results)} relevant documents found[/dim]\n")
 
         async with LLMClient(model=model) as client:
             with Progress(
@@ -178,7 +178,7 @@ Responde usando el contexto cuando sea relevante."""
                 console=console,
                 transient=True,
             ) as progress:
-                progress.add_task("Procesando...", total=None)
+                progress.add_task("Processing...", total=None)
                 response = await client.generate(final_prompt)
 
             console.print(Markdown(response.content))
@@ -216,33 +216,33 @@ def datalake(
                 console=console,
                 transient=True,
             ) as progress:
-                progress.add_task("Escaneando datalakes...", total=None)
+                progress.add_task("Scanning datalakes...", total=None)
                 stats = await connector.get_stats()
 
-            console.print(Panel.fit("[bold]Estadísticas de Datalakes[/bold]"))
+            console.print(Panel.fit("[bold]Datalake Statistics[/bold]"))
 
             # Summary table
-            table = Table(title="Resumen")
-            table.add_column("Métrica", style="cyan")
-            table.add_column("Valor", style="green")
-            table.add_row("Total archivos", str(stats["total_files"]))
-            table.add_row("Tamaño total", f"{stats['total_size_mb']:.2f} MB")
+            table = Table(title="Summary")
+            table.add_column("Metric", style="cyan")
+            table.add_column("Value", style="green")
+            table.add_row("Total files", str(stats["total_files"]))
+            table.add_row("Total size", f"{stats['total_size_mb']:.2f} MB")
             console.print(table)
 
             # By datalake
             if stats["by_datalake"]:
-                table = Table(title="Por Datalake")
+                table = Table(title="By Datalake")
                 table.add_column("Datalake", style="cyan")
-                table.add_column("Archivos", style="green")
+                table.add_column("Files", style="green")
                 for name, count in sorted(stats["by_datalake"].items(), key=lambda x: -x[1]):
                     table.add_row(name, str(count))
                 console.print(table)
 
             # By category
             if stats["by_category"]:
-                table = Table(title="Por Categoría")
-                table.add_column("Categoría", style="cyan")
-                table.add_column("Archivos", style="green")
+                table = Table(title="By Category")
+                table.add_column("Category", style="cyan")
+                table.add_column("Files", style="green")
                 for cat, count in sorted(stats["by_category"].items(), key=lambda x: -x[1]):
                     table.add_row(cat, str(count))
                 console.print(table)
@@ -254,13 +254,13 @@ def datalake(
                 console=console,
                 transient=True,
             ) as progress:
-                progress.add_task("Buscando...", total=None)
+                progress.add_task("Searching...", total=None)
                 results = await connector.search_files(query, limit=20)
 
-            console.print(f"\n[bold]Resultados para '{query}':[/bold] {len(results)} encontrados\n")
+            console.print(f"\n[bold]Results for '{query}':[/bold] {len(results)} found\n")
             for f in results:
                 console.print(f"[cyan]{f.datalake}[/cyan] / [dim]{f.relative_path}[/dim]")
-                console.print(f"  [dim]Categoría: {f.category} | Tamaño: {f.size} bytes[/dim]")
+                console.print(f"  [dim]Category: {f.category} | Size: {f.size} bytes[/dim]")
 
         elif action == "decisions":
             with Progress(
@@ -269,10 +269,10 @@ def datalake(
                 console=console,
                 transient=True,
             ) as progress:
-                progress.add_task("Cargando decisiones...", total=None)
+                progress.add_task("Loading decisions...", total=None)
                 decisions = await connector.get_decisions()
 
-            console.print(f"\n[bold]Decisiones técnicas:[/bold] {len(decisions)}\n")
+            console.print(f"\n[bold]Technical decisions:[/bold] {len(decisions)}\n")
             for d in decisions[:10]:
                 console.print(f"[cyan]• {d.relative_path}[/cyan]")
 
@@ -283,7 +283,7 @@ def datalake(
                 console=console,
                 transient=True,
             ) as progress:
-                progress.add_task("Cargando learnings...", total=None)
+                progress.add_task("Loading learnings...", total=None)
                 learnings = await connector.get_learnings()
 
             console.print(f"\n[bold]Learnings:[/bold] {len(learnings)}\n")
@@ -291,7 +291,7 @@ def datalake(
                 console.print(f"[cyan]• {l.relative_path}[/cyan]")
 
         else:
-            console.print("[yellow]Acciones disponibles: stats, search, decisions, learnings[/yellow]")
+            console.print("[yellow]Available actions: stats, search, decisions, learnings[/yellow]")
 
     async_run(run())
 
@@ -311,11 +311,11 @@ def flywheel(
             console.print(Panel.fit("[bold]Flywheel Status[/bold]"))
 
             table = Table()
-            table.add_column("Propiedad", style="cyan")
-            table.add_column("Valor", style="green")
-            table.add_row("Habilitado", "✓" if stats["enabled"] else "✗")
+            table.add_column("Property", style="cyan")
+            table.add_column("Value", style="green")
+            table.add_row("Enabled", "✓" if stats["enabled"] else "✗")
             table.add_row("Session ID", stats["session_id"][:8])
-            table.add_row("En buffer", str(stats["buffered_records"]))
+            table.add_row("In buffer", str(stats["buffered_records"]))
             console.print(table)
 
         elif action == "export":
@@ -325,14 +325,14 @@ def flywheel(
                 console=console,
                 transient=True,
             ) as progress:
-                progress.add_task("Exportando training pairs...", total=None)
+                progress.add_task("Exporting training pairs...", total=None)
                 output = await collector.export_training_pairs()
 
-            console.print(f"[green]Exportado a:[/green] {output}")
+            console.print(f"[green]Exported to:[/green] {output}")
 
         elif action == "flush":
             await collector.flush()
-            console.print("[green]Buffer vaciado[/green]")
+            console.print("[green]Buffer flushed[/green]")
 
     async_run(run())
 
@@ -354,16 +354,16 @@ def rag(
                     console=console,
                     transient=True,
                 ) as progress:
-                    progress.add_task("Indexando datalake...", total=None)
+                    progress.add_task("Indexing datalake...", total=None)
                     stats = await engine.index_datalake()
 
                 console.print(Panel.fit("[bold green]RAG Indexing Complete[/bold green]"))
                 table = Table()
-                table.add_column("Métrica", style="cyan")
-                table.add_column("Valor", style="green")
-                table.add_row("Archivos indexados", str(stats["files_indexed"]))
-                table.add_row("Chunks creados", str(stats["chunks_created"]))
-                table.add_row("Errores", str(stats["errors"]))
+                table.add_column("Metric", style="cyan")
+                table.add_column("Value", style="green")
+                table.add_row("Files indexed", str(stats["files_indexed"]))
+                table.add_row("Chunks created", str(stats["chunks_created"]))
+                table.add_row("Errors", str(stats["errors"]))
                 console.print(table)
 
             elif action == "search" and query:
@@ -373,10 +373,10 @@ def rag(
                     console=console,
                     transient=True,
                 ) as progress:
-                    progress.add_task("Buscando...", total=None)
+                    progress.add_task("Searching...", total=None)
                     results = await engine.retrieve(query, limit=5)
 
-                console.print(f"\n[bold]Resultados para:[/bold] {query}\n")
+                console.print(f"\n[bold]Results for:[/bold] {query}\n")
                 for i, r in enumerate(results, 1):
                     console.print(f"[cyan]{i}. [{r['category']}][/cyan] (score: {r['score']:.3f})")
                     console.print(f"   [dim]{r['text'][:200]}...[/dim]\n")
@@ -385,14 +385,14 @@ def rag(
                 stats = engine.get_stats()
                 console.print(Panel.fit("[bold]RAG Stats[/bold]"))
                 table = Table()
-                table.add_column("Métrica", style="cyan")
-                table.add_column("Valor", style="green")
-                table.add_row("Documentos indexados", str(stats["total_documents"]))
+                table.add_column("Metric", style="cyan")
+                table.add_column("Value", style="green")
+                table.add_row("Documents indexed", str(stats["total_documents"]))
                 table.add_row("DB Path", str(stats.get("db_path", "N/A")))
                 console.print(table)
 
             else:
-                console.print("[yellow]Uso: rag index | rag search -q 'query' | rag stats[/yellow]")
+                console.print("[yellow]Usage: rag index | rag search -q 'query' | rag stats[/yellow]")
 
     async_run(run())
 
@@ -434,32 +434,32 @@ def graph(
                 console=console,
                 transient=True,
             ) as progress:
-                progress.add_task("Construyendo Knowledge Graph...", total=None)
+                progress.add_task("Building Knowledge Graph...", total=None)
                 stats = await pipeline.build(force=force)
 
             console.print(Panel.fit("[bold green]Knowledge Graph Build Complete[/bold green]"))
             table = Table()
-            table.add_column("Metrica", style="cyan")
-            table.add_column("Valor", style="green")
-            table.add_row("Archivos procesados", str(stats["files_processed"]))
-            table.add_row("Pairs procesados", str(stats["pairs_processed"]))
-            table.add_row("Triples extraidos", str(stats["triples_extracted"]))
-            table.add_row("Errores", str(stats["errors"]))
+            table.add_column("Metric", style="cyan")
+            table.add_column("Value", style="green")
+            table.add_row("Files processed", str(stats["files_processed"]))
+            table.add_row("Pairs processed", str(stats["pairs_processed"]))
+            table.add_row("Triples extracted", str(stats["triples_extracted"]))
+            table.add_row("Errors", str(stats["errors"]))
             if stats.get("transcript_triples_extracted", 0) > 0:
                 table.add_row(
-                    "Triples de transcripts",
+                    "Transcript triples",
                     str(stats["transcript_triples_extracted"]),
                 )
             if stats.get("inferred_triples", 0) > 0:
                 table.add_row(
-                    "Triples inferidos",
+                    "Inferred triples",
                     str(stats["inferred_triples"]),
                 )
             console.print(table)
 
             graph_stats = engine.get_stats()
-            console.print(f"\n[dim]Entidades: {graph_stats['entity_count']} | "
-                          f"Relaciones: {graph_stats['edge_count']}[/dim]")
+            console.print(f"\n[dim]Entities: {graph_stats['entity_count']} | "
+                          f"Relations: {graph_stats['edge_count']}[/dim]")
 
         async_run(run_build())
 
@@ -468,10 +468,10 @@ def graph(
         results = engine.search_entities(query, limit=10)
 
         if not results:
-            console.print(f"[yellow]No se encontraron entidades para '{query}'[/yellow]")
+            console.print(f"[yellow]No entities found for '{query}'[/yellow]")
             return
 
-        console.print(f"\n[bold]Entidades para '{query}':[/bold]\n")
+        console.print(f"\n[bold]Entities for '{query}':[/bold]\n")
         for entity in results:
             console.print(
                 f"[cyan]{entity.name}[/cyan] "
@@ -503,37 +503,37 @@ def graph(
             console.print(Panel.fit("[bold]Knowledge Graph Stats[/bold]"))
 
             table = Table()
-            table.add_column("Metrica", style="cyan")
-            table.add_column("Valor", style="green")
-            table.add_row("Entidades", str(stats["entity_count"]))
-            table.add_row("Relaciones", str(stats["edge_count"]))
-            table.add_row("Componentes conexos", str(stats["connected_components"]))
+            table.add_column("Metric", style="cyan")
+            table.add_column("Value", style="green")
+            table.add_row("Entities", str(stats["entity_count"]))
+            table.add_row("Relations", str(stats["edge_count"]))
+            table.add_row("Connected components", str(stats["connected_components"]))
             table.add_row("Graph path", str(stats["graph_path"]))
             console.print(table)
 
             if stats["entity_types"]:
-                table = Table(title="Por tipo de entidad")
-                table.add_column("Tipo", style="cyan")
+                table = Table(title="By entity type")
+                table.add_column("Type", style="cyan")
                 table.add_column("Count", style="green")
                 for etype, count in sorted(stats["entity_types"].items(), key=lambda x: -x[1]):
                     table.add_row(etype, str(count))
                 console.print(table)
 
             if stats["relation_types"]:
-                table = Table(title="Por tipo de relacion")
-                table.add_column("Tipo", style="cyan")
+                table = Table(title="By relation type")
+                table.add_column("Type", style="cyan")
                 table.add_column("Count", style="green")
                 for rtype, count in sorted(stats["relation_types"].items(), key=lambda x: -x[1]):
                     table.add_row(rtype, str(count))
                 console.print(table)
         else:
-            console.print("[yellow]No hay Knowledge Graph construido.[/yellow]")
-            console.print("[dim]Ejecuta: fabrik graph build[/dim]")
+            console.print("[yellow]No Knowledge Graph built.[/yellow]")
+            console.print("[dim]Run: fabrik graph build[/dim]")
 
     elif action == "complete":
         if not engine.load():
-            console.print("[yellow]No hay Knowledge Graph construido.[/yellow]")
-            console.print("[dim]Ejecuta: fabrik graph build[/dim]")
+            console.print("[yellow]No Knowledge Graph built.[/yellow]")
+            console.print("[dim]Run: fabrik graph build[/dim]")
             return
 
         stats = engine.complete()
@@ -541,17 +541,17 @@ def graph(
 
         console.print(Panel.fit("[bold green]Graph Completion Done[/bold green]"))
         table = Table()
-        table.add_column("Metrica", style="cyan")
-        table.add_column("Valor", style="green")
-        table.add_row("Total inferidos", str(stats["inferred_count"]))
-        table.add_row("DEPENDS_ON inferidos", str(stats["depends_on_inferred"]))
-        table.add_row("PART_OF inferidos", str(stats["part_of_inferred"]))
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", style="green")
+        table.add_row("Total inferred", str(stats["inferred_count"]))
+        table.add_row("DEPENDS_ON inferred", str(stats["depends_on_inferred"]))
+        table.add_row("PART_OF inferred", str(stats["part_of_inferred"]))
         console.print(table)
 
     elif action == "prune":
         if not engine.load():
-            console.print("[yellow]No hay Knowledge Graph construido.[/yellow]")
-            console.print("[dim]Ejecuta: fabrik graph build[/dim]")
+            console.print("[yellow]No Knowledge Graph built.[/yellow]")
+            console.print("[dim]Run: fabrik graph build[/dim]")
             return
 
         before_stats = engine.get_stats()
@@ -569,23 +569,23 @@ def graph(
         console.print(Panel.fit(title))
 
         table = Table()
-        table.add_column("Metrica", style="cyan")
-        table.add_column("Valor", style="green")
-        table.add_row("Entidades antes", str(before_stats["entity_count"]))
-        table.add_row("Edges antes", str(before_stats["edge_count"]))
-        table.add_row("Edges eliminados", str(result["edges_removed"]))
-        table.add_row("Entidades eliminadas", str(result["entities_removed"]))
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", style="green")
+        table.add_row("Entities before", str(before_stats["entity_count"]))
+        table.add_row("Edges before", str(before_stats["edge_count"]))
+        table.add_row("Edges removed", str(result["edges_removed"]))
+        table.add_row("Entities removed", str(result["entities_removed"]))
         console.print(table)
 
         if dry_run and result["removed_entities"]:
-            console.print("\n[bold]Entidades a eliminar:[/bold]")
+            console.print("\n[bold]Entities to remove:[/bold]")
             for ent in result["removed_entities"][:20]:
                 console.print(f"  [dim]{ent['name']}[/dim] ({ent['type']})")
             if len(result["removed_entities"]) > 20:
-                console.print(f"  [dim]... y {len(result['removed_entities']) - 20} mas[/dim]")
+                console.print(f"  [dim]... and {len(result['removed_entities']) - 20} more[/dim]")
 
     else:
-        console.print("[yellow]Uso: graph build | graph search -q 'query' | graph stats | graph complete | graph prune[/yellow]")
+        console.print("[yellow]Usage: graph build | graph search -q 'query' | graph stats | graph complete | graph prune[/yellow]")
 
 
 @app.command()
@@ -602,21 +602,21 @@ def learn(
             console=console,
             transient=True,
         ) as progress:
-            progress.add_task("Procesando sesiones de Claude Code...", total=None)
+            progress.add_task("Processing Claude Code sessions...", total=None)
             stats = process_all_sessions()
 
         console.print(Panel.fit("[bold green]Session Observer[/bold green]"))
 
         table = Table()
-        table.add_column("Métrica", style="cyan")
-        table.add_column("Valor", style="green")
-        table.add_row("Sesiones procesadas", str(stats["sessions_processed"]))
-        table.add_row("Training pairs extraídos", str(stats["pairs_extracted"]))
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", style="green")
+        table.add_row("Sessions processed", str(stats["sessions_processed"]))
+        table.add_row("Training pairs extracted", str(stats["pairs_extracted"]))
         console.print(table)
 
         if stats.get("by_category"):
-            table = Table(title="Por categoría")
-            table.add_column("Categoría", style="cyan")
+            table = Table(title="By category")
+            table.add_column("Category", style="cyan")
             table.add_column("Count", style="green")
             for cat, count in sorted(stats["by_category"].items(), key=lambda x: -x[1]):
                 table.add_row(cat, str(count))
@@ -630,18 +630,18 @@ def learn(
         console.print(Panel.fit("[bold]Learning Stats[/bold]"))
 
         table = Table()
-        table.add_column("Métrica", style="cyan")
-        table.add_column("Valor", style="green")
-        table.add_row("Sesiones procesadas", str(stats["sessions_processed"]))
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", style="green")
+        table.add_row("Sessions processed", str(stats["sessions_processed"]))
         table.add_row("Total training pairs", str(stats["total_training_pairs"]))
         console.print(table)
 
     elif action == "reset":
         if PROCESSED_MARKER.exists():
             PROCESSED_MARKER.unlink()
-            console.print("[green]Reset completo. Todas las sesiones serán reprocesadas.[/green]")
+            console.print("[green]Reset complete. All sessions will be reprocessed.[/green]")
         else:
-            console.print("[yellow]Nada que resetear.[/yellow]")
+            console.print("[yellow]Nothing to reset.[/yellow]")
 
 
 @app.command()
@@ -661,18 +661,18 @@ def finetune(
 
         console.print(Panel.fit("[bold]Fine-tuning Data[/bold]"))
         table = Table()
-        table.add_column("Métrica", style="cyan")
-        table.add_column("Valor", style="green")
-        table.add_row("Training pairs disponibles", str(stats["total_training_pairs"]))
-        table.add_row("Épocas configuradas", str(epochs))
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", style="green")
+        table.add_row("Training pairs available", str(stats["total_training_pairs"]))
+        table.add_row("Configured epochs", str(epochs))
         table.add_row("Batch size", str(batch_size))
         console.print(table)
 
-        console.print("\n[dim]Para entrenar ejecuta sin --dry-run[/dim]")
+        console.print("\n[dim]To train, run without --dry-run[/dim]")
         return
 
     console.print(Panel.fit("[bold yellow]Starting Fine-tuning[/bold yellow]"))
-    console.print("[dim]Esto puede tomar varias horas...[/dim]\n")
+    console.print("[dim]This may take several hours...[/dim]\n")
 
     # Run finetune script
     cmd = [
@@ -694,13 +694,13 @@ def models():
     async def run():
         async with LLMClient() as client:
             if not await client.health_check():
-                console.print("[red]Ollama no disponible[/red]")
+                console.print("[red]Ollama unavailable[/red]")
                 return
 
             models = await client.list_models()
 
-            table = Table(title="Modelos disponibles")
-            table.add_column("Modelo", style="cyan")
+            table = Table(title="Available models")
+            table.add_column("Model", style="cyan")
             for m in models:
                 table.add_row(m)
             console.print(table)
@@ -747,9 +747,9 @@ def status():
     console.print(Panel.fit("[bold blue]Fabrik-Codek Status[/bold blue]"))
 
     table = Table()
-    table.add_column("Componente", style="cyan")
-    table.add_column("Estado", style="green")
-    table.add_column("Detalle", style="dim")
+    table.add_column("Component", style="cyan")
+    table.add_column("Status", style="green")
+    table.add_column("Detail", style="dim")
 
     # Settings
     table.add_row("Config", "✓", f"Model: {settings.default_model}")
@@ -780,7 +780,7 @@ def status():
             f"{gstats['entity_count']} entities, {gstats['edge_count']} edges",
         )
     else:
-        table.add_row("Knowledge Graph", "✗", "No construido (fabrik graph build)")
+        table.add_row("Knowledge Graph", "✗", "Not built (fabrik graph build)")
 
     console.print(table)
 
@@ -795,10 +795,10 @@ def status():
 
     ollama_ok = async_run(check_ollama())
     if ollama_ok:
-        console.print("\n[green]✓ Ollama conectado[/green]")
+        console.print("\n[green]✓ Ollama connected[/green]")
     else:
-        console.print("\n[red]✗ Ollama no disponible[/red]")
-        console.print("[dim]  Ejecuta: ollama serve[/dim]")
+        console.print("\n[red]✗ Ollama unavailable[/red]")
+        console.print("[dim]  Run: ollama serve[/dim]")
 
 
 @app.command()
@@ -964,9 +964,115 @@ def mcp(
         mcp_server.run(transport="stdio")
 
 
+@app.command()
+def fulltext(
+    action: str = typer.Argument("status", help="Action: status, index, search"),
+    query: Optional[str] = typer.Option(None, "--query", "-q", help="Search query"),
+    limit: int = typer.Option(5, "--limit", "-n", help="Max results"),
+):
+    """Full-text search via Meilisearch - status, index datalake, or search."""
+    from src.knowledge.fulltext_engine import FullTextEngine
+
+    if action == "status":
+        async def _check():
+            async with FullTextEngine() as ft:
+                healthy = await ft.health_check()
+                if not healthy:
+                    console.print("[yellow]Meilisearch:[/yellow] unavailable")
+                    console.print(f"  URL: {ft._url}")
+                    console.print("  Run: meilisearch --master-key=fabrik-dev-key")
+                    return
+                stats = await ft.get_stats()
+                console.print("[green]Meilisearch:[/green] connected")
+                console.print(f"  Documents: {stats['document_count']}")
+                console.print(f"  Indexing:  {stats['is_indexing']}")
+
+        async_run(_check())
+
+    elif action == "index":
+        import json as json_mod
+
+        from src.config import settings
+
+        async def _index():
+            async with FullTextEngine() as ft:
+                if not await ft.health_check():
+                    console.print("[red]Error:[/red] Meilisearch not available")
+                    raise typer.Exit(1)
+
+                await ft.ensure_index()
+                console.print("[blue]Indexing datalake into Meilisearch...[/blue]")
+
+                tp_dir = settings.datalake_path / "02-processed" / "training-pairs"
+                total = 0
+                if tp_dir.exists():
+                    files = sorted(tp_dir.glob("*.jsonl"))
+                    with Progress(
+                        SpinnerColumn(),
+                        TextColumn("[progress.description]{task.description}"),
+                        console=console,
+                        transient=True,
+                    ) as progress:
+                        task = progress.add_task("Indexing...", total=len(files))
+                        for f in files:
+                            docs = []
+                            for line in f.read_text().splitlines():
+                                if not line.strip():
+                                    continue
+                                try:
+                                    record = json_mod.loads(line)
+                                    text = record.get("output", record.get("text", ""))
+                                    instruction = record.get("instruction", "")
+                                    if text and len(text) >= 50:
+                                        docs.append({
+                                            "id": FullTextEngine.make_doc_id(text, f.name),
+                                            "text": f"{instruction}\n{text}" if instruction else text,
+                                            "source": f.name,
+                                            "category": "training",
+                                            "project": record.get("project", ""),
+                                        })
+                                except json_mod.JSONDecodeError:
+                                    continue
+                            if docs:
+                                count = await ft.index_documents(docs)
+                                total += count
+                            progress.advance(task)
+
+                console.print(f"[green]Indexed {total} documents[/green]")
+
+        async_run(_index())
+
+    elif action == "search":
+        if not query:
+            console.print("[red]Error:[/red] --query/-q is required for search")
+            raise typer.Exit(1)
+
+        async def _search():
+            async with FullTextEngine() as ft:
+                if not await ft.health_check():
+                    console.print("[red]Error:[/red] Meilisearch not available")
+                    raise typer.Exit(1)
+
+                results = await ft.search(query, limit=limit)
+                if not results:
+                    console.print("[yellow]No results[/yellow]")
+                    return
+
+                for i, r in enumerate(results, 1):
+                    console.print(f"\n[bold]{i}.[/bold] [{r['category']}] {r['source']}")
+                    console.print(f"   {r['text'][:200]}")
+
+        async_run(_search())
+
+    else:
+        console.print(f"[red]Unknown action:[/red] {action}")
+        console.print("Available: status, index, search")
+        raise typer.Exit(1)
+
+
 @app.callback()
 def main():
-    """Fabrik-Codek: Claude Code's little brother 🤖"""
+    """Fabrik-Codek: Claude Code's little brother"""
     pass
 
 

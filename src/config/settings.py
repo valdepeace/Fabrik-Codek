@@ -64,6 +64,12 @@ class Settings(BaseSettings):
     graph_default_depth: int = 2
     graph_min_weight: float = 0.3
 
+    # Full-text search (Meilisearch) - optional
+    meilisearch_url: str = "http://localhost:7700"
+    meilisearch_key: str | None = None
+    meilisearch_index: str = "fabrik_knowledge"
+    fulltext_weight: float = 0.0  # 0.0 = disabled in RRF fusion
+
     # Logging
     log_level: str = "INFO"
     log_format: Literal["json", "console"] = "console"
