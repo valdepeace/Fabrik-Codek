@@ -4,7 +4,7 @@
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests: 546](https://img.shields.io/badge/tests-546%20passing-brightgreen.svg)]()
+[![Tests: 637](https://img.shields.io/badge/tests-637%20passing-brightgreen.svg)]()
 
 Fabrik-Codek is a local AI development assistant that works with **any model via Ollama** (Qwen, Llama, DeepSeek, Codestral, Phi, Mistral...) and combines three-tier hybrid retrieval (vector + knowledge graph + full-text search) to provide context-aware coding assistance. It features a CLI, a REST API, and a continuous data flywheel that improves over time. No vendor lock-in — switch models with a flag.
 
@@ -20,6 +20,7 @@ graph TB
     subgraph Core
         LLM[LLM Client - Ollama]
         Profile[Personal Profile]
+        Competence[Competence Model]
     end
 
     subgraph Knowledge
@@ -37,12 +38,14 @@ graph TB
     end
 
     CLI --> Profile
+    CLI --> Competence
     CLI --> LLM
     CLI --> Hybrid
     API --> Profile
     API --> LLM
     API --> Hybrid
     Profile --> LLM
+    Competence --> LLM
 
     Hybrid --> RAG
     Hybrid --> Graph
@@ -70,6 +73,7 @@ graph TB
 - **Graph Completion**: Infers transitive relationships to densify the knowledge graph
 - **Quality-Gated Logger**: Rejects low-quality data to prevent model degradation
 - **Personal Profile**: Domain-agnostic user profiling that analyzes your datalake and generates behavioral instructions for the LLM — the model learns your stack, architecture, and tooling preferences automatically
+- **Competence Model**: Measures depth of knowledge per topic (Expert/Competent/Novice/Unknown) using entry count, graph density, and recency signals — enables adaptive responses based on your actual expertise level
 
 ## Cognitive Architecture
 
@@ -130,8 +134,9 @@ graph LR
 | **Learning** | Improving from every interaction | Data Flywheel with quality gate (rejects low-quality data) |
 | **Reasoning** | Extracting insights from experience | Thinking block extraction + heuristic/LLM entity extraction |
 | **Action** | Interacting with the developer | CLI (Typer + Rich) + REST API (FastAPI) |
+| **Self-awareness** | Knowing what it knows and what it doesn't | Competence Model (Expert/Competent/Novice/Unknown per topic) |
 
-Unlike frameworks that only describe cognitive architectures in papers, Fabrik-Codek is a **working implementation** — it captures how you work, builds a knowledge graph from your accumulated experience, and feeds that context back into every query.
+Unlike frameworks that only describe cognitive architectures in papers, Fabrik-Codek is a **working implementation** — it captures how you work, builds a knowledge graph from your accumulated experience, measures your expertise depth per topic, and feeds that context back into every query.
 
 ## Personal Profile
 
@@ -159,6 +164,53 @@ Build AI agents and RAG pipelines.
 ```
 
 **Domain-agnostic by design.** Software development is the first implemented domain, but the architecture supports any profession. A lawyer's datalake with civil law cases would produce a legal profile. Adding a new domain requires implementing a `_detect_<domain>_patterns()` method (~30 lines).
+
+## Competence Model
+
+While the Personal Profile identifies **what** topics you work with, the Competence Model measures **how deep** your knowledge is in each one. It produces a competence map with Expert/Competent/Novice/Unknown levels per topic.
+
+```bash
+fabrik competence build   # Analyze datalake, build competence map
+fabrik competence show    # View current competence scores
+```
+
+**How it works:**
+
+Three signals are combined per topic with adaptive weighting:
+
+| Signal | Weight | Source | Formula |
+|--------|--------|--------|---------|
+| **Entry count** | 0.5 | Training pair categories | `log(entries+1) / log(100+1)` |
+| **Entity density** | 0.3 | Knowledge graph edges | `edge_count / 100` |
+| **Recency** | 0.2 | Auto-capture timestamps | `0.5^(days/30)` — exponential decay |
+
+When signals are missing (no graph, no recent activity), the weights redistribute gracefully:
+
+| Available signals | Entry | Density | Recency |
+|---|---|---|---|
+| All three | 0.5 | 0.3 | 0.2 |
+| No graph | 0.7 | — | 0.3 |
+| No recency | 0.6 | 0.4 | — |
+| Entry only | 0.8 | — | — |
+
+**Classification thresholds:**
+
+| Level | Score range | Meaning |
+|-------|------------|---------|
+| **Expert** | >= 0.8 | Deep knowledge, confident responses |
+| **Competent** | 0.4 - 0.8 | Solid understanding |
+| **Novice** | 0.1 - 0.4 | Basic awareness |
+| **Unknown** | < 0.1 | No data available |
+
+**System prompt injection** — the competence fragment is automatically appended to the personal profile prompt:
+
+```
+You are assisting a software development professional.
+Use Python for code examples. Prefer FastAPI with async/await.
+Expert in: postgresql, docker. Competent in: angular, terraform.
+```
+
+This enables adaptive behavior: expert topics get confident responses, novice topics get honest disclosure, and unknown topics suggest escalation.
 
 ## Quick Start
 
@@ -208,6 +260,8 @@ fabrik status                  # Check system health
 | `fabrik fulltext status` | Check Meilisearch connection |
 | `fabrik fulltext index` | Index datalake into Meilisearch |
 | `fabrik fulltext search -q "..."` | Full-text keyword search |
+| `fabrik competence build` | Build competence map from datalake + graph |
+| `fabrik competence show` | View competence scores per topic |
 | `fabrik learn process` | Extract training data from Claude Code sessions |
 
 ## API Reference
@@ -475,13 +529,13 @@ logger.log_error(
 fabrik-codek/
 ├── src/
 │   ├── config/             # Settings (Pydantic BaseSettings)
-│   ├── core/               # LLM client (Ollama)
+│   ├── core/               # LLM client, Personal Profile, Competence Model
 │   ├── interfaces/         # CLI (Typer) + API (FastAPI)
 │   ├── knowledge/          # RAG, Knowledge Graph, Extraction Pipeline
 │   │   └── extraction/     # Heuristic, LLM, Transcript extractors
 │   ├── flywheel/           # Data collection + session observer
 │   └── tools/              # Code tools
-├── tests/                  # 527 tests
+├── tests/                  # 637 tests
 ├── scripts/                # Setup, benchmarks, enrichment
 ├── data/                   # Local data storage
 ├── prompts/                # Prompt templates

@@ -83,19 +83,19 @@ class TestStatus:
         result = self._run_status()
         assert result.exit_code == 0
         assert "Fabrik-Codek Status" in result.output
-        assert "Ollama connected" in result.output
+        assert "Ollama conectado" in result.output
 
     def test_status_graph_not_built(self):
         """Status shows graph not built when load() returns False."""
         result = self._run_status(graph_loaded=False)
         assert result.exit_code == 0
-        assert "Not built" in result.output
+        assert "No construido" in result.output
 
     def test_status_ollama_down(self):
         """Status reports Ollama unavailable."""
         result = self._run_status(ollama_ok=False)
         assert result.exit_code == 0
-        assert "Ollama unavailable" in result.output
+        assert "Ollama no disponible" in result.output
 
     def test_status_datalake_missing(self):
         """Status shows datalake missing when path does not exist."""
@@ -141,7 +141,7 @@ class TestModels:
             result = runner.invoke(app, ["models"])
 
         assert result.exit_code == 0
-        assert "Ollama unavailable" in result.output
+        assert "Ollama no disponible" in result.output
 
     def test_models_empty_list(self):
         """models command handles empty model list gracefully."""
@@ -154,7 +154,7 @@ class TestModels:
             result = runner.invoke(app, ["models"])
 
         assert result.exit_code == 0
-        assert "Model" in result.output
+        assert "Modelo" in result.output
 
 
 # ===================================================================
@@ -194,7 +194,7 @@ class TestGraph:
             result = runner.invoke(app, ["graph", "stats"])
 
         assert result.exit_code == 0
-        assert "No Knowledge Graph built" in result.output
+        assert "No hay Knowledge Graph" in result.output
 
     def test_graph_build_success(self):
         """graph build runs pipeline and shows results."""
@@ -261,7 +261,7 @@ class TestGraph:
             result = runner.invoke(app, ["graph", "search", "-q", "nonexistent"])
 
         assert result.exit_code == 0
-        assert "No entities found" in result.output
+        assert "No se encontraron" in result.output
 
     def test_graph_complete_success(self):
         """graph complete runs inference and saves."""
@@ -290,7 +290,7 @@ class TestGraph:
             result = runner.invoke(app, ["graph", "complete"])
 
         assert result.exit_code == 0
-        assert "No Knowledge Graph built" in result.output
+        assert "No hay Knowledge Graph" in result.output
 
     def test_graph_prune_dry_run(self):
         """graph prune --dry-run previews without modifying."""
@@ -351,7 +351,7 @@ class TestGraph:
             result = runner.invoke(app, ["graph", "prune"])
 
         assert result.exit_code == 0
-        assert "No Knowledge Graph built" in result.output
+        assert "No hay Knowledge Graph" in result.output
 
     def test_graph_prune_with_custom_thresholds(self):
         """graph prune passes custom thresholds to engine."""
@@ -470,7 +470,7 @@ class TestLearn:
             result = runner.invoke(app, ["learn", "reset"])
 
         assert result.exit_code == 0
-        assert "Reset complete" in result.output
+        assert "Reset completo" in result.output
         mock_marker.unlink.assert_called_once()
 
     def test_learn_reset_nothing_to_reset(self):
@@ -485,7 +485,7 @@ class TestLearn:
             result = runner.invoke(app, ["learn", "reset"])
 
         assert result.exit_code == 0
-        assert "Nothing to reset" in result.output
+        assert "Nada que resetear" in result.output
 
 
 # ===================================================================
@@ -542,7 +542,7 @@ class TestRag:
             result = runner.invoke(app, ["rag", "search", "-q", "timeout"])
 
         assert result.exit_code == 0
-        assert "Results for" in result.output
+        assert "Resultados para" in result.output
         assert "0.951" in result.output
         assert "Fix timeout error" in result.output
 
@@ -598,7 +598,7 @@ class TestDatalake:
 
         assert result.exit_code == 0
         assert "agents" in result.output
-        assert "1 found" in result.output
+        assert "1 encontrado" in result.output
 
     def test_datalake_decisions(self):
         """datalake decisions shows technical decisions."""
@@ -612,7 +612,7 @@ class TestDatalake:
             result = runner.invoke(app, ["datalake", "decisions"])
 
         assert result.exit_code == 0
-        assert "Technical decisions" in result.output
+        assert "Decisiones" in result.output
 
     def test_datalake_learnings(self):
         """datalake learnings shows learning entries."""
@@ -674,7 +674,7 @@ class TestFlywheel:
             result = runner.invoke(app, ["flywheel", "export"])
 
         assert result.exit_code == 0
-        assert "Exported to" in result.output or "training_export" in result.output
+        assert "Exportado" in result.output or "training_export" in result.output
 
     def test_flywheel_flush(self):
         """flywheel flush clears the buffer."""
@@ -685,7 +685,7 @@ class TestFlywheel:
             result = runner.invoke(app, ["flywheel", "flush"])
 
         assert result.exit_code == 0
-        assert "Buffer flushed" in result.output
+        assert "Buffer vaciado" in result.output
 
 
 # ===================================================================
@@ -783,7 +783,7 @@ class TestFinetune:
         """finetune --dry-run shows data stats without training."""
         mock_stats = {
             "sessions_processed": 20,
-            "total_training_pairs": 5000,
+            "total_training_pairs": 8955,
         }
 
         with patch(
@@ -794,8 +794,8 @@ class TestFinetune:
 
         assert result.exit_code == 0
         assert "Fine-tuning Data" in result.output
-        assert "5000" in result.output
-        assert "without --dry-run" in result.output
+        assert "8955" in result.output
+        assert "sin --dry-run" in result.output
 
     def test_finetune_dry_run_with_options(self):
         """finetune --dry-run shows configured epochs and batch."""
@@ -1018,13 +1018,19 @@ class TestFulltext:
         assert result.exit_code != 0
 
 
+# ===================================================================
+# TestProfile
+# ===================================================================
+
 class TestProfile:
-    def test_profile_show_no_profile(self, tmp_path):
-        """profile show with no profile built shows guidance."""
+    """Tests for the ``profile`` command."""
+
+    def test_profile_show_no_profile(self):
+        """profile show when no profile exists."""
         from unittest.mock import patch, MagicMock
 
         mock_settings = MagicMock()
-        mock_settings.data_dir = tmp_path
+        mock_settings.data_dir = Path("/tmp/nonexistent-fabrik-test-dir")
 
         with patch("src.config.settings", mock_settings):
             result = runner.invoke(app, ["profile", "show"])
@@ -1055,3 +1061,38 @@ class TestProfile:
 
         assert result.exit_code == 0
         assert "Profile Built" in result.output or "profile" in result.output.lower()
+
+
+# ===================================================================
+# TestCompetenceCLI
+# ===================================================================
+
+class TestCompetenceCLI:
+    """Tests for the ``competence`` command."""
+
+    def test_load_nonexistent_returns_empty(self, tmp_path):
+        """load_competence_map on nonexistent returns empty CompetenceMap."""
+        from src.core.competence_model import load_competence_map
+        result = load_competence_map(tmp_path / "missing.json")
+        assert result.topics == []
+        assert result.total_topics == 0
+
+    def test_build_creates_output_file(self, tmp_path):
+        """CompetenceBuilder.build creates output file."""
+        from src.core.competence_model import CompetenceBuilder, load_competence_map
+
+        # Create minimal datalake
+        tp_dir = tmp_path / "02-processed" / "training-pairs"
+        tp_dir.mkdir(parents=True)
+        import json
+        with open(tp_dir / "python_data.jsonl", "w") as f:
+            for i in range(10):
+                f.write(json.dumps({"input": f"q{i}", "output": f"a{i}", "category": "python"}) + "\n")
+
+        output = tmp_path / "competence_map.json"
+        builder = CompetenceBuilder(datalake_path=tmp_path)
+        result = builder.build(output_path=output)
+
+        assert output.exists()
+        loaded = load_competence_map(output)
+        assert len(loaded.topics) > 0

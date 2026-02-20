@@ -39,11 +39,11 @@ def chat(
 
     console.print(
         Panel.fit(
-            "[bold blue]Fabrik-Codek[/bold blue] - Your little brother is ready",
+            "[bold blue]Fabrik-Codek[/bold blue] - Tu hermano pequeño está listo 🤖",
             subtitle=f"Model: {model or settings.default_model}",
         )
     )
-    console.print("[dim]Type 'exit' or 'quit' to leave, 'clear' to reset[/dim]\n")
+    console.print("[dim]Escribe 'exit' o 'quit' para salir, 'clear' para limpiar[/dim]\n")
 
     history_file = settings.data_dir / ".chat_history"
     session = PromptSession(history=FileHistory(str(history_file)))
@@ -57,14 +57,22 @@ def chat(
         async with LLMClient(model=model) as client:
             # Check health
             if not await client.health_check():
-                console.print("[red]Error: Ollama is not available[/red]")
-                console.print("[dim]Run: ollama serve[/dim]")
+                console.print("[red]Error: Ollama no está disponible[/red]")
+                console.print("[dim]Ejecuta: ollama serve[/dim]")
                 return
 
             # Inject personal profile into system prompt
             from src.core.personal_profile import get_active_profile
             active_profile = get_active_profile()
             profile_system = active_profile.to_system_prompt()
+
+            # Inject competence fragment
+            from src.core.competence_model import get_active_competence_map
+            competence_map = get_active_competence_map()
+            competence_fragment = competence_map.to_system_prompt_fragment()
+            if competence_fragment:
+                profile_system = f"{profile_system} {competence_fragment}"
+
             if not system and profile_system:
                 messages.insert(0, {"role": "system", "content": profile_system})
 
@@ -95,7 +103,7 @@ def chat(
                     console=console,
                     transient=True,
                 ) as progress:
-                    progress.add_task("Thinking...", total=None)
+                    progress.add_task("Pensando...", total=None)
                     response = await client.chat(messages)
 
                 messages.append({"role": "assistant", "content": response.content})
@@ -116,7 +124,7 @@ def chat(
         await collector.close()
 
     async_run(run_chat())
-    console.print("\n[dim]Goodbye![/dim]")
+    console.print("\n[dim]¡Hasta luego! 👋[/dim]")
 
 
 @app.command()
@@ -135,17 +143,24 @@ def ask(
     context = ""
     final_prompt = prompt
 
-    # Inject personal profile into system prompt
-    from src.core.personal_profile import get_active_profile
-    active_profile = get_active_profile()
-    profile_system = active_profile.to_system_prompt()
-
     if context_file and context_file.exists():
         context = context_file.read_text()
         final_prompt = f"Context:\n```\n{context}\n```\n\nQuestion: {prompt}"
 
     async def run():
         nonlocal final_prompt, context
+
+        # Inject personal profile into system prompt
+        from src.core.personal_profile import get_active_profile
+        active_profile = get_active_profile()
+        profile_system = active_profile.to_system_prompt()
+
+        # Inject competence fragment
+        from src.core.competence_model import get_active_competence_map
+        competence_map = get_active_competence_map()
+        competence_fragment = competence_map.to_system_prompt_fragment()
+        if competence_fragment:
+            profile_system = f"{profile_system} {competence_fragment}"
 
         # Inject hybrid RAG context (vector + graph)
         if use_graph:
@@ -173,15 +188,15 @@ def ask(
                         f"[{r['category']}] {r['text'][:500]}"
                         for r in rag_results
                     ])
-                    final_prompt = f"""Context from your knowledge base:
+                    final_prompt = f"""Contexto de tu base de conocimiento:
 {rag_context}
 
 ---
-Question: {prompt}
+Pregunta: {prompt}
 
-Answer using the context when relevant."""
+Responde usando el contexto cuando sea relevante."""
                     context = rag_context
-                    console.print(f"[dim]RAG: {len(rag_results)} relevant documents found[/dim]\n")
+                    console.print(f"[dim]RAG: {len(rag_results)} documentos relevantes encontrados[/dim]\n")
 
         async with LLMClient(model=model) as client:
             with Progress(
@@ -190,7 +205,7 @@ Answer using the context when relevant."""
                 console=console,
                 transient=True,
             ) as progress:
-                progress.add_task("Processing...", total=None)
+                progress.add_task("Procesando...", total=None)
                 response = await client.generate(final_prompt, system=profile_system)
 
             console.print(Markdown(response.content))
@@ -228,33 +243,33 @@ def datalake(
                 console=console,
                 transient=True,
             ) as progress:
-                progress.add_task("Scanning datalakes...", total=None)
+                progress.add_task("Escaneando datalakes...", total=None)
                 stats = await connector.get_stats()
 
-            console.print(Panel.fit("[bold]Datalake Statistics[/bold]"))
+            console.print(Panel.fit("[bold]Estadísticas de Datalakes[/bold]"))
 
             # Summary table
-            table = Table(title="Summary")
-            table.add_column("Metric", style="cyan")
-            table.add_column("Value", style="green")
-            table.add_row("Total files", str(stats["total_files"]))
-            table.add_row("Total size", f"{stats['total_size_mb']:.2f} MB")
+            table = Table(title="Resumen")
+            table.add_column("Métrica", style="cyan")
+            table.add_column("Valor", style="green")
+            table.add_row("Total archivos", str(stats["total_files"]))
+            table.add_row("Tamaño total", f"{stats['total_size_mb']:.2f} MB")
             console.print(table)
 
             # By datalake
             if stats["by_datalake"]:
-                table = Table(title="By Datalake")
+                table = Table(title="Por Datalake")
                 table.add_column("Datalake", style="cyan")
-                table.add_column("Files", style="green")
+                table.add_column("Archivos", style="green")
                 for name, count in sorted(stats["by_datalake"].items(), key=lambda x: -x[1]):
                     table.add_row(name, str(count))
                 console.print(table)
 
             # By category
             if stats["by_category"]:
-                table = Table(title="By Category")
-                table.add_column("Category", style="cyan")
-                table.add_column("Files", style="green")
+                table = Table(title="Por Categoría")
+                table.add_column("Categoría", style="cyan")
+                table.add_column("Archivos", style="green")
                 for cat, count in sorted(stats["by_category"].items(), key=lambda x: -x[1]):
                     table.add_row(cat, str(count))
                 console.print(table)
@@ -266,13 +281,13 @@ def datalake(
                 console=console,
                 transient=True,
             ) as progress:
-                progress.add_task("Searching...", total=None)
+                progress.add_task("Buscando...", total=None)
                 results = await connector.search_files(query, limit=20)
 
-            console.print(f"\n[bold]Results for '{query}':[/bold] {len(results)} found\n")
+            console.print(f"\n[bold]Resultados para '{query}':[/bold] {len(results)} encontrados\n")
             for f in results:
                 console.print(f"[cyan]{f.datalake}[/cyan] / [dim]{f.relative_path}[/dim]")
-                console.print(f"  [dim]Category: {f.category} | Size: {f.size} bytes[/dim]")
+                console.print(f"  [dim]Categoría: {f.category} | Tamaño: {f.size} bytes[/dim]")
 
         elif action == "decisions":
             with Progress(
@@ -281,10 +296,10 @@ def datalake(
                 console=console,
                 transient=True,
             ) as progress:
-                progress.add_task("Loading decisions...", total=None)
+                progress.add_task("Cargando decisiones...", total=None)
                 decisions = await connector.get_decisions()
 
-            console.print(f"\n[bold]Technical decisions:[/bold] {len(decisions)}\n")
+            console.print(f"\n[bold]Decisiones técnicas:[/bold] {len(decisions)}\n")
             for d in decisions[:10]:
                 console.print(f"[cyan]• {d.relative_path}[/cyan]")
 
@@ -295,7 +310,7 @@ def datalake(
                 console=console,
                 transient=True,
             ) as progress:
-                progress.add_task("Loading learnings...", total=None)
+                progress.add_task("Cargando learnings...", total=None)
                 learnings = await connector.get_learnings()
 
             console.print(f"\n[bold]Learnings:[/bold] {len(learnings)}\n")
@@ -303,7 +318,7 @@ def datalake(
                 console.print(f"[cyan]• {l.relative_path}[/cyan]")
 
         else:
-            console.print("[yellow]Available actions: stats, search, decisions, learnings[/yellow]")
+            console.print("[yellow]Acciones disponibles: stats, search, decisions, learnings[/yellow]")
 
     async_run(run())
 
@@ -323,11 +338,11 @@ def flywheel(
             console.print(Panel.fit("[bold]Flywheel Status[/bold]"))
 
             table = Table()
-            table.add_column("Property", style="cyan")
-            table.add_column("Value", style="green")
-            table.add_row("Enabled", "✓" if stats["enabled"] else "✗")
+            table.add_column("Propiedad", style="cyan")
+            table.add_column("Valor", style="green")
+            table.add_row("Habilitado", "✓" if stats["enabled"] else "✗")
             table.add_row("Session ID", stats["session_id"][:8])
-            table.add_row("In buffer", str(stats["buffered_records"]))
+            table.add_row("En buffer", str(stats["buffered_records"]))
             console.print(table)
 
         elif action == "export":
@@ -337,14 +352,14 @@ def flywheel(
                 console=console,
                 transient=True,
             ) as progress:
-                progress.add_task("Exporting training pairs...", total=None)
+                progress.add_task("Exportando training pairs...", total=None)
                 output = await collector.export_training_pairs()
 
-            console.print(f"[green]Exported to:[/green] {output}")
+            console.print(f"[green]Exportado a:[/green] {output}")
 
         elif action == "flush":
             await collector.flush()
-            console.print("[green]Buffer flushed[/green]")
+            console.print("[green]Buffer vaciado[/green]")
 
     async_run(run())
 
@@ -366,16 +381,16 @@ def rag(
                     console=console,
                     transient=True,
                 ) as progress:
-                    progress.add_task("Indexing datalake...", total=None)
+                    progress.add_task("Indexando datalake...", total=None)
                     stats = await engine.index_datalake()
 
                 console.print(Panel.fit("[bold green]RAG Indexing Complete[/bold green]"))
                 table = Table()
-                table.add_column("Metric", style="cyan")
-                table.add_column("Value", style="green")
-                table.add_row("Files indexed", str(stats["files_indexed"]))
-                table.add_row("Chunks created", str(stats["chunks_created"]))
-                table.add_row("Errors", str(stats["errors"]))
+                table.add_column("Métrica", style="cyan")
+                table.add_column("Valor", style="green")
+                table.add_row("Archivos indexados", str(stats["files_indexed"]))
+                table.add_row("Chunks creados", str(stats["chunks_created"]))
+                table.add_row("Errores", str(stats["errors"]))
                 console.print(table)
 
             elif action == "search" and query:
@@ -385,10 +400,10 @@ def rag(
                     console=console,
                     transient=True,
                 ) as progress:
-                    progress.add_task("Searching...", total=None)
+                    progress.add_task("Buscando...", total=None)
                     results = await engine.retrieve(query, limit=5)
 
-                console.print(f"\n[bold]Results for:[/bold] {query}\n")
+                console.print(f"\n[bold]Resultados para:[/bold] {query}\n")
                 for i, r in enumerate(results, 1):
                     console.print(f"[cyan]{i}. [{r['category']}][/cyan] (score: {r['score']:.3f})")
                     console.print(f"   [dim]{r['text'][:200]}...[/dim]\n")
@@ -397,14 +412,14 @@ def rag(
                 stats = engine.get_stats()
                 console.print(Panel.fit("[bold]RAG Stats[/bold]"))
                 table = Table()
-                table.add_column("Metric", style="cyan")
-                table.add_column("Value", style="green")
-                table.add_row("Documents indexed", str(stats["total_documents"]))
+                table.add_column("Métrica", style="cyan")
+                table.add_column("Valor", style="green")
+                table.add_row("Documentos indexados", str(stats["total_documents"]))
                 table.add_row("DB Path", str(stats.get("db_path", "N/A")))
                 console.print(table)
 
             else:
-                console.print("[yellow]Usage: rag index | rag search -q 'query' | rag stats[/yellow]")
+                console.print("[yellow]Uso: rag index | rag search -q 'query' | rag stats[/yellow]")
 
     async_run(run())
 
@@ -446,32 +461,32 @@ def graph(
                 console=console,
                 transient=True,
             ) as progress:
-                progress.add_task("Building Knowledge Graph...", total=None)
+                progress.add_task("Construyendo Knowledge Graph...", total=None)
                 stats = await pipeline.build(force=force)
 
             console.print(Panel.fit("[bold green]Knowledge Graph Build Complete[/bold green]"))
             table = Table()
-            table.add_column("Metric", style="cyan")
-            table.add_column("Value", style="green")
-            table.add_row("Files processed", str(stats["files_processed"]))
-            table.add_row("Pairs processed", str(stats["pairs_processed"]))
-            table.add_row("Triples extracted", str(stats["triples_extracted"]))
-            table.add_row("Errors", str(stats["errors"]))
+            table.add_column("Metrica", style="cyan")
+            table.add_column("Valor", style="green")
+            table.add_row("Archivos procesados", str(stats["files_processed"]))
+            table.add_row("Pairs procesados", str(stats["pairs_processed"]))
+            table.add_row("Triples extraidos", str(stats["triples_extracted"]))
+            table.add_row("Errores", str(stats["errors"]))
             if stats.get("transcript_triples_extracted", 0) > 0:
                 table.add_row(
-                    "Transcript triples",
+                    "Triples de transcripts",
                     str(stats["transcript_triples_extracted"]),
                 )
             if stats.get("inferred_triples", 0) > 0:
                 table.add_row(
-                    "Inferred triples",
+                    "Triples inferidos",
                     str(stats["inferred_triples"]),
                 )
             console.print(table)
 
             graph_stats = engine.get_stats()
-            console.print(f"\n[dim]Entities: {graph_stats['entity_count']} | "
-                          f"Relations: {graph_stats['edge_count']}[/dim]")
+            console.print(f"\n[dim]Entidades: {graph_stats['entity_count']} | "
+                          f"Relaciones: {graph_stats['edge_count']}[/dim]")
 
         async_run(run_build())
 
@@ -480,10 +495,10 @@ def graph(
         results = engine.search_entities(query, limit=10)
 
         if not results:
-            console.print(f"[yellow]No entities found for '{query}'[/yellow]")
+            console.print(f"[yellow]No se encontraron entidades para '{query}'[/yellow]")
             return
 
-        console.print(f"\n[bold]Entities for '{query}':[/bold]\n")
+        console.print(f"\n[bold]Entidades para '{query}':[/bold]\n")
         for entity in results:
             console.print(
                 f"[cyan]{entity.name}[/cyan] "
@@ -515,37 +530,37 @@ def graph(
             console.print(Panel.fit("[bold]Knowledge Graph Stats[/bold]"))
 
             table = Table()
-            table.add_column("Metric", style="cyan")
-            table.add_column("Value", style="green")
-            table.add_row("Entities", str(stats["entity_count"]))
-            table.add_row("Relations", str(stats["edge_count"]))
-            table.add_row("Connected components", str(stats["connected_components"]))
+            table.add_column("Metrica", style="cyan")
+            table.add_column("Valor", style="green")
+            table.add_row("Entidades", str(stats["entity_count"]))
+            table.add_row("Relaciones", str(stats["edge_count"]))
+            table.add_row("Componentes conexos", str(stats["connected_components"]))
             table.add_row("Graph path", str(stats["graph_path"]))
             console.print(table)
 
             if stats["entity_types"]:
-                table = Table(title="By entity type")
-                table.add_column("Type", style="cyan")
+                table = Table(title="Por tipo de entidad")
+                table.add_column("Tipo", style="cyan")
                 table.add_column("Count", style="green")
                 for etype, count in sorted(stats["entity_types"].items(), key=lambda x: -x[1]):
                     table.add_row(etype, str(count))
                 console.print(table)
 
             if stats["relation_types"]:
-                table = Table(title="By relation type")
-                table.add_column("Type", style="cyan")
+                table = Table(title="Por tipo de relacion")
+                table.add_column("Tipo", style="cyan")
                 table.add_column("Count", style="green")
                 for rtype, count in sorted(stats["relation_types"].items(), key=lambda x: -x[1]):
                     table.add_row(rtype, str(count))
                 console.print(table)
         else:
-            console.print("[yellow]No Knowledge Graph built.[/yellow]")
-            console.print("[dim]Run: fabrik graph build[/dim]")
+            console.print("[yellow]No hay Knowledge Graph construido.[/yellow]")
+            console.print("[dim]Ejecuta: fabrik graph build[/dim]")
 
     elif action == "complete":
         if not engine.load():
-            console.print("[yellow]No Knowledge Graph built.[/yellow]")
-            console.print("[dim]Run: fabrik graph build[/dim]")
+            console.print("[yellow]No hay Knowledge Graph construido.[/yellow]")
+            console.print("[dim]Ejecuta: fabrik graph build[/dim]")
             return
 
         stats = engine.complete()
@@ -553,17 +568,17 @@ def graph(
 
         console.print(Panel.fit("[bold green]Graph Completion Done[/bold green]"))
         table = Table()
-        table.add_column("Metric", style="cyan")
-        table.add_column("Value", style="green")
-        table.add_row("Total inferred", str(stats["inferred_count"]))
-        table.add_row("DEPENDS_ON inferred", str(stats["depends_on_inferred"]))
-        table.add_row("PART_OF inferred", str(stats["part_of_inferred"]))
+        table.add_column("Metrica", style="cyan")
+        table.add_column("Valor", style="green")
+        table.add_row("Total inferidos", str(stats["inferred_count"]))
+        table.add_row("DEPENDS_ON inferidos", str(stats["depends_on_inferred"]))
+        table.add_row("PART_OF inferidos", str(stats["part_of_inferred"]))
         console.print(table)
 
     elif action == "prune":
         if not engine.load():
-            console.print("[yellow]No Knowledge Graph built.[/yellow]")
-            console.print("[dim]Run: fabrik graph build[/dim]")
+            console.print("[yellow]No hay Knowledge Graph construido.[/yellow]")
+            console.print("[dim]Ejecuta: fabrik graph build[/dim]")
             return
 
         before_stats = engine.get_stats()
@@ -581,23 +596,23 @@ def graph(
         console.print(Panel.fit(title))
 
         table = Table()
-        table.add_column("Metric", style="cyan")
-        table.add_column("Value", style="green")
-        table.add_row("Entities before", str(before_stats["entity_count"]))
-        table.add_row("Edges before", str(before_stats["edge_count"]))
-        table.add_row("Edges removed", str(result["edges_removed"]))
-        table.add_row("Entities removed", str(result["entities_removed"]))
+        table.add_column("Metrica", style="cyan")
+        table.add_column("Valor", style="green")
+        table.add_row("Entidades antes", str(before_stats["entity_count"]))
+        table.add_row("Edges antes", str(before_stats["edge_count"]))
+        table.add_row("Edges eliminados", str(result["edges_removed"]))
+        table.add_row("Entidades eliminadas", str(result["entities_removed"]))
         console.print(table)
 
         if dry_run and result["removed_entities"]:
-            console.print("\n[bold]Entities to remove:[/bold]")
+            console.print("\n[bold]Entidades a eliminar:[/bold]")
             for ent in result["removed_entities"][:20]:
                 console.print(f"  [dim]{ent['name']}[/dim] ({ent['type']})")
             if len(result["removed_entities"]) > 20:
-                console.print(f"  [dim]... and {len(result['removed_entities']) - 20} more[/dim]")
+                console.print(f"  [dim]... y {len(result['removed_entities']) - 20} mas[/dim]")
 
     else:
-        console.print("[yellow]Usage: graph build | graph search -q 'query' | graph stats | graph complete | graph prune[/yellow]")
+        console.print("[yellow]Uso: graph build | graph search -q 'query' | graph stats | graph complete | graph prune[/yellow]")
 
 
 @app.command()
@@ -614,21 +629,21 @@ def learn(
             console=console,
             transient=True,
         ) as progress:
-            progress.add_task("Processing Claude Code sessions...", total=None)
+            progress.add_task("Procesando sesiones de Claude Code...", total=None)
             stats = process_all_sessions()
 
         console.print(Panel.fit("[bold green]Session Observer[/bold green]"))
 
         table = Table()
-        table.add_column("Metric", style="cyan")
-        table.add_column("Value", style="green")
-        table.add_row("Sessions processed", str(stats["sessions_processed"]))
-        table.add_row("Training pairs extracted", str(stats["pairs_extracted"]))
+        table.add_column("Métrica", style="cyan")
+        table.add_column("Valor", style="green")
+        table.add_row("Sesiones procesadas", str(stats["sessions_processed"]))
+        table.add_row("Training pairs extraídos", str(stats["pairs_extracted"]))
         console.print(table)
 
         if stats.get("by_category"):
-            table = Table(title="By category")
-            table.add_column("Category", style="cyan")
+            table = Table(title="Por categoría")
+            table.add_column("Categoría", style="cyan")
             table.add_column("Count", style="green")
             for cat, count in sorted(stats["by_category"].items(), key=lambda x: -x[1]):
                 table.add_row(cat, str(count))
@@ -642,18 +657,18 @@ def learn(
         console.print(Panel.fit("[bold]Learning Stats[/bold]"))
 
         table = Table()
-        table.add_column("Metric", style="cyan")
-        table.add_column("Value", style="green")
-        table.add_row("Sessions processed", str(stats["sessions_processed"]))
+        table.add_column("Métrica", style="cyan")
+        table.add_column("Valor", style="green")
+        table.add_row("Sesiones procesadas", str(stats["sessions_processed"]))
         table.add_row("Total training pairs", str(stats["total_training_pairs"]))
         console.print(table)
 
     elif action == "reset":
         if PROCESSED_MARKER.exists():
             PROCESSED_MARKER.unlink()
-            console.print("[green]Reset complete. All sessions will be reprocessed.[/green]")
+            console.print("[green]Reset completo. Todas las sesiones serán reprocesadas.[/green]")
         else:
-            console.print("[yellow]Nothing to reset.[/yellow]")
+            console.print("[yellow]Nada que resetear.[/yellow]")
 
 
 @app.command()
@@ -673,18 +688,18 @@ def finetune(
 
         console.print(Panel.fit("[bold]Fine-tuning Data[/bold]"))
         table = Table()
-        table.add_column("Metric", style="cyan")
-        table.add_column("Value", style="green")
-        table.add_row("Training pairs available", str(stats["total_training_pairs"]))
-        table.add_row("Configured epochs", str(epochs))
+        table.add_column("Métrica", style="cyan")
+        table.add_column("Valor", style="green")
+        table.add_row("Training pairs disponibles", str(stats["total_training_pairs"]))
+        table.add_row("Épocas configuradas", str(epochs))
         table.add_row("Batch size", str(batch_size))
         console.print(table)
 
-        console.print("\n[dim]To train, run without --dry-run[/dim]")
+        console.print("\n[dim]Para entrenar ejecuta sin --dry-run[/dim]")
         return
 
     console.print(Panel.fit("[bold yellow]Starting Fine-tuning[/bold yellow]"))
-    console.print("[dim]This may take several hours...[/dim]\n")
+    console.print("[dim]Esto puede tomar varias horas...[/dim]\n")
 
     # Run finetune script
     cmd = [
@@ -695,7 +710,8 @@ def finetune(
     if max_samples:
         cmd.extend(["--max-samples", str(max_samples)])
 
-    subprocess.run(cmd, cwd=str(Path(__file__).parent.parent.parent))
+    project_root = str(Path(__file__).parent.parent.parent)
+    subprocess.run(cmd, cwd=project_root)
 
 
 @app.command()
@@ -706,13 +722,13 @@ def models():
     async def run():
         async with LLMClient() as client:
             if not await client.health_check():
-                console.print("[red]Ollama unavailable[/red]")
+                console.print("[red]Ollama no disponible[/red]")
                 return
 
             models = await client.list_models()
 
-            table = Table(title="Available models")
-            table.add_column("Model", style="cyan")
+            table = Table(title="Modelos disponibles")
+            table.add_column("Modelo", style="cyan")
             for m in models:
                 table.add_row(m)
             console.print(table)
@@ -759,9 +775,9 @@ def status():
     console.print(Panel.fit("[bold blue]Fabrik-Codek Status[/bold blue]"))
 
     table = Table()
-    table.add_column("Component", style="cyan")
-    table.add_column("Status", style="green")
-    table.add_column("Detail", style="dim")
+    table.add_column("Componente", style="cyan")
+    table.add_column("Estado", style="green")
+    table.add_column("Detalle", style="dim")
 
     # Settings
     table.add_row("Config", "✓", f"Model: {settings.default_model}")
@@ -792,7 +808,7 @@ def status():
             f"{gstats['entity_count']} entities, {gstats['edge_count']} edges",
         )
     else:
-        table.add_row("Knowledge Graph", "✗", "Not built (fabrik graph build)")
+        table.add_row("Knowledge Graph", "✗", "No construido (fabrik graph build)")
 
     console.print(table)
 
@@ -807,10 +823,10 @@ def status():
 
     ollama_ok = async_run(check_ollama())
     if ollama_ok:
-        console.print("\n[green]✓ Ollama connected[/green]")
+        console.print("\n[green]✓ Ollama conectado[/green]")
     else:
-        console.print("\n[red]✗ Ollama unavailable[/red]")
-        console.print("[dim]  Run: ollama serve[/dim]")
+        console.print("\n[red]✗ Ollama no disponible[/red]")
+        console.print("[dim]  Ejecuta: ollama serve[/dim]")
 
 
 @app.command()
@@ -1086,69 +1102,170 @@ def fulltext(
 def profile(
     action: str = typer.Argument("show", help="Action: show, build"),
 ):
-    """Personal profile - show or rebuild from datalake."""
+    """Manage your personal profile — learned from the datalake."""
     from src.config import settings
     from src.core.personal_profile import ProfileBuilder, load_profile
 
     profile_path = settings.data_dir / "profile" / "personal_profile.json"
 
-    if action == "show":
-        p = load_profile(profile_path)
-        if p.domain == "unknown":
-            console.print("[yellow]No profile built yet.[/yellow]")
-            console.print("[dim]Run: fabrik profile build[/dim]")
-            return
+    if action == "build":
+        console.print(Panel.fit("[bold]Building Personal Profile...[/bold]"))
 
-        domain_display = p.domain.replace("_", " ").title()
-        console.print(
-            Panel.fit(
-                f"[bold]Personal Profile[/bold] — {domain_display}",
-            )
-        )
-        table = Table()
-        table.add_column("Field", style="cyan")
-        table.add_column("Value", style="green")
-        table.add_row("Domain", f"{p.domain} ({p.domain_confidence:.0%})")
-        table.add_row("Built", p.built_at)
-        table.add_row("Total Entries", str(p.total_entries))
-        if p.top_topics:
-            topics_str = "\n".join(f"  {t.topic}: {t.weight:.0%}" for t in p.top_topics[:8])
-            table.add_row("Top Topics", topics_str)
-        if p.patterns:
-            patterns_str = "\n".join(f"  {pat}" for pat in p.patterns)
-            table.add_row("Patterns", patterns_str)
-        if p.task_types_detected:
-            table.add_row("Task Types", ", ".join(p.task_types_detected))
-        table.add_row("Style", f"Formality: {p.style.formality:.0%}, Language: {p.style.language}")
-        console.print(table)
-
-        console.print("\n[bold]System prompt preview:[/bold]")
-        console.print(f"[dim]{p.to_system_prompt()}[/dim]")
-
-    elif action == "build":
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
             console=console,
             transient=True,
         ) as progress:
-            progress.add_task("Building profile from datalake...", total=None)
+            progress.add_task("Analyzing datalake...", total=None)
             builder = ProfileBuilder(datalake_path=settings.datalake_path)
-            p = builder.build(output_path=profile_path)
+            result = builder.build(output_path=profile_path)
 
-        console.print(Panel.fit("[bold green]Profile Built[/bold green]"))
-        console.print(f"  Domain: {p.domain} ({p.domain_confidence:.0%})")
-        console.print(f"  Topics: {len(p.top_topics)}")
-        console.print(f"  Entries: {p.total_entries}")
-        console.print(f"\n[dim]Saved to: {profile_path}[/dim]")
+        table = Table(title="Profile Built")
+        table.add_column("Field", style="bold cyan")
+        table.add_column("Value", style="green")
+        table.add_row("Domain", f"{result.domain} ({result.domain_confidence:.0%})")
+        table.add_row("Topics", ", ".join(t.topic for t in result.top_topics[:5]))
+        table.add_row("Patterns", str(len(result.patterns)))
+        table.add_row("Task Types", ", ".join(result.task_types_detected))
+        table.add_row("Total Entries", str(result.total_entries))
+        table.add_row("Saved To", str(profile_path))
+        console.print(table)
+
+    elif action == "show":
+        loaded = load_profile(profile_path)
+        if loaded.domain == "unknown" and not loaded.top_topics:
+            console.print("[yellow]No profile built yet. Run:[/yellow] fabrik profile build")
+            return
+
+        table = Table(title=f"Personal Profile — {loaded.domain.replace('_', ' ').title()}")
+        table.add_column("Field", style="bold cyan")
+        table.add_column("Value", style="green")
+        table.add_row("Domain", f"{loaded.domain} ({loaded.domain_confidence:.0%})")
+        table.add_row("Built", loaded.built_at or "unknown")
+        table.add_row("Total Entries", str(loaded.total_entries))
+
+        if loaded.top_topics:
+            topics_str = "\n".join(
+                f"  {t.topic}: {t.weight:.0%}" for t in loaded.top_topics[:8]
+            )
+            table.add_row("Top Topics", topics_str)
+
+        if loaded.patterns:
+            table.add_row("Patterns", "\n".join(f"  {p}" for p in loaded.patterns))
+
+        if loaded.task_types_detected:
+            table.add_row("Task Types", ", ".join(loaded.task_types_detected))
+
+        table.add_row("Style", f"Formality: {loaded.style.formality:.0%}, Language: {loaded.style.language}")
+        console.print(table)
+
+        console.print(f"\n[dim]System prompt preview:[/dim]")
+        console.print(f"[italic]{loaded.to_system_prompt()}[/italic]")
+    else:
+        console.print("[yellow]Usage:[/yellow] fabrik profile [show|build]")
+
+
+@app.command()
+def competence(
+    action: str = typer.Argument("show", help="Action: show, build"),
+):
+    """Manage your competence map — measures depth of knowledge per topic."""
+    from src.config import settings
+    from src.core.competence_model import (
+        CompetenceBuilder, load_competence_map, save_competence_map,
+    )
+
+    competence_path = settings.data_dir / "profile" / "competence_map.json"
+
+    if action == "build":
+        console.print(Panel.fit("[bold]Building Competence Map...[/bold]"))
+
+        # Try to load graph engine (optional)
+        graph = None
+        try:
+            from src.knowledge.graph_engine import GraphEngine
+            graph = GraphEngine()
+            if not graph.load():
+                graph = None
+        except Exception:
+            pass
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+            transient=True,
+        ) as progress:
+            progress.add_task("Analyzing competence...", total=None)
+            builder = CompetenceBuilder(
+                datalake_path=settings.datalake_path,
+                graph_engine=graph,
+            )
+            result = builder.build(output_path=competence_path)
+
+        if not result.topics:
+            console.print("[yellow]No competence data found. Build your profile first.[/yellow]")
+            return
+
+        table = Table(title="Competence Map Built")
+        table.add_column("Topic", style="bold cyan")
+        table.add_column("Score", style="green", justify="right")
+        table.add_column("Level", style="yellow")
+        table.add_column("Entries", justify="right")
+        table.add_column("Density", justify="right")
+        table.add_column("Recency", justify="right")
+
+        for entry in result.topics:
+            table.add_row(
+                entry.topic,
+                f"{entry.score:.4f}",
+                entry.level,
+                str(entry.entries),
+                f"{entry.entity_density:.4f}",
+                f"{entry.recency_weight:.4f}",
+            )
+
+        console.print(table)
+        console.print(f"\n[dim]Saved to: {competence_path}[/dim]")
+
+    elif action == "show":
+        loaded = load_competence_map(competence_path)
+        if not loaded.topics:
+            console.print("[yellow]No competence map built yet. Run:[/yellow] fabrik competence build")
+            return
+
+        table = Table(title="Competence Map")
+        table.add_column("Topic", style="bold cyan")
+        table.add_column("Score", style="green", justify="right")
+        table.add_column("Level", style="yellow")
+        table.add_column("Entries", justify="right")
+        table.add_column("Last Activity")
+
+        for entry in loaded.topics:
+            table.add_row(
+                entry.topic,
+                f"{entry.score:.4f}",
+                entry.level,
+                str(entry.entries),
+                entry.last_activity or "—",
+            )
+
+        console.print(table)
+        console.print(f"\n[dim]Built at: {loaded.built_at}[/dim]")
+
+        fragment = loaded.to_system_prompt_fragment()
+        if fragment:
+            console.print(f"\n[dim]System prompt fragment:[/dim]")
+            console.print(f"[italic]{fragment}[/italic]")
 
     else:
-        console.print("[yellow]Available actions: show, build[/yellow]")
+        console.print("[yellow]Usage:[/yellow] fabrik competence [show|build]")
 
 
 @app.callback()
 def main():
-    """Fabrik-Codek: Claude Code's little brother"""
+    """Fabrik-Codek: Claude Code's little brother 🤖"""
     pass
 
 
