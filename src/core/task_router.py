@@ -255,8 +255,13 @@ _CLASSIFICATION_PROMPT = (
 
 
 def _get_llm_client():
-    """Get an LLMClient instance. Separated for testability."""
-    from src.core import LLMClient
+    """Get an LLMClient instance. Separated for testability.
+
+    Imports from the concrete module (not the package __init__) so that
+    patches on ``src.core.LLMClient`` in CLI tests don't accidentally
+    intercept the router's internal classification client.
+    """
+    from src.core.llm_client import LLMClient
     return LLMClient()
 
 

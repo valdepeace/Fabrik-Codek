@@ -61,20 +61,18 @@ def chat(
                 console.print("[dim]Ejecuta: ollama serve[/dim]")
                 return
 
-            # Inject personal profile into system prompt
+            # Route via TaskRouter for adaptive system prompt
             from src.core.personal_profile import get_active_profile
-            active_profile = get_active_profile()
-            profile_system = active_profile.to_system_prompt()
-
-            # Inject competence fragment
             from src.core.competence_model import get_active_competence_map
-            competence_map = get_active_competence_map()
-            competence_fragment = competence_map.to_system_prompt_fragment()
-            if competence_fragment:
-                profile_system = f"{profile_system} {competence_fragment}"
+            from src.core.task_router import TaskRouter
 
-            if not system and profile_system:
-                messages.insert(0, {"role": "system", "content": profile_system})
+            active_profile = get_active_profile()
+            competence_map = get_active_competence_map()
+            router = TaskRouter(competence_map, active_profile, settings)
+
+            if not system:
+                initial_decision = await router.route("general conversation")
+                messages.insert(0, {"role": "system", "content": initial_decision.system_prompt})
 
             while True:
                 try:
@@ -150,26 +148,37 @@ def ask(
     async def run():
         nonlocal final_prompt, context
 
-        # Inject personal profile into system prompt
+        # Route via TaskRouter for adaptive prompt/model/strategy
+        from src.config import settings
         from src.core.personal_profile import get_active_profile
-        active_profile = get_active_profile()
-        profile_system = active_profile.to_system_prompt()
-
-        # Inject competence fragment
         from src.core.competence_model import get_active_competence_map
+        from src.core.task_router import TaskRouter
+
+        active_profile = get_active_profile()
         competence_map = get_active_competence_map()
-        competence_fragment = competence_map.to_system_prompt_fragment()
-        if competence_fragment:
-            profile_system = f"{profile_system} {competence_fragment}"
+        router = TaskRouter(competence_map, active_profile, settings)
+        decision = await router.route(prompt)
+
+        console.print(
+            f"[dim]Router: {decision.task_type} "
+            f"({decision.classification_method}) "
+            f"| topic={decision.topic or '—'} "
+            f"| competence={decision.competence_level} "
+            f"| model={decision.model}[/dim]"
+        )
 
         # Inject hybrid RAG context (vector + graph)
         if use_graph:
             from src.knowledge.hybrid_rag import HybridRAGEngine
             async with HybridRAGEngine() as hybrid:
-                results = await hybrid.retrieve(prompt, limit=5, graph_depth=graph_depth)
+                results = await hybrid.retrieve(
+                    prompt, limit=5,
+                    graph_depth=decision.strategy.graph_depth,
+                )
                 if results:
                     final_prompt = await hybrid.query_with_context(
-                        prompt, limit=5, graph_depth=graph_depth,
+                        prompt, limit=5,
+                        graph_depth=decision.strategy.graph_depth,
                     )
                     context = final_prompt
                     origins = {r.get("origin", "?") for r in results}
@@ -206,7 +215,11 @@ Responde usando el contexto cuando sea relevante."""
                 transient=True,
             ) as progress:
                 progress.add_task("Procesando...", total=None)
-                response = await client.generate(final_prompt, system=profile_system)
+                response = await client.generate(
+                    final_prompt,
+                    system=decision.system_prompt,
+                    model=decision.model,
+                )
 
             console.print(Markdown(response.content))
             console.print(f"\n[dim]({response.tokens_used} tokens, {response.latency_ms:.0f}ms)[/dim]")
