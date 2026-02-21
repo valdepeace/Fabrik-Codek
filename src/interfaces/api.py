@@ -213,12 +213,26 @@ async def lifespan(app: FastAPI):
     else:
         app.state.hybrid = None
 
+    # 6. Task Router
+    try:
+        from src.core.personal_profile import get_active_profile
+        from src.core.competence_model import get_active_competence_map
+        from src.core.task_router import TaskRouter
+
+        profile = get_active_profile()
+        competence_map = get_active_competence_map()
+        app.state.router = TaskRouter(competence_map, profile, settings)
+    except Exception as exc:
+        logger.warning("task_router_init_failed", error=str(exc))
+        app.state.router = None
+
     logger.info(
         "api_startup_complete",
         ollama=app.state.ollama_ok,
         rag=app.state.rag is not None,
         graph=app.state.graph is not None,
         fulltext=getattr(app.state, "fulltext", None) is not None,
+        router=app.state.router is not None,
     )
 
     yield  # ---- application runs ----
@@ -341,13 +355,18 @@ async def ask(req: AskRequest, request: Request):
     state = request.app.state
     await _ensure_ollama(state)
 
+    # Route the query
+    router = getattr(state, "router", None)
+    decision = await router.route(req.prompt) if router else None
+    graph_depth = decision.strategy.graph_depth if decision else req.graph_depth
+
     prompt = req.prompt
     sources: list[dict] = []
 
     # Hybrid RAG (vector + graph)
     if req.use_graph and getattr(state, "hybrid", None):
         results = await state.hybrid.retrieve(
-            req.prompt, limit=5, graph_depth=req.graph_depth,
+            req.prompt, limit=5, graph_depth=graph_depth,
         )
         if results:
             context = "\n---\n".join(
@@ -378,7 +397,11 @@ async def ask(req: AskRequest, request: Request):
                 for r in rag_results
             ]
 
-    response = await state.llm.generate(prompt, model=req.model)
+    response = await state.llm.generate(
+        prompt,
+        model=decision.model if decision else req.model,
+        system=decision.system_prompt if decision else None,
+    )
 
     return AskResponse(
         answer=response.content,
