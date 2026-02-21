@@ -183,6 +183,14 @@ class ExtractionPipeline:
         completion_stats = self.engine.complete()
         self._stats["inferred_triples"] = completion_stats["inferred_count"]
 
+        # 8. Apply temporal decay
+        decay_stats = self.engine.apply_decay(
+            half_life_days=settings.graph_decay_half_life_days,
+        )
+        self._stats["decay_edges_decayed"] = decay_stats["edges_decayed"]
+        self._stats["decay_edges_skipped"] = decay_stats["edges_skipped"]
+        logger.info("graph_decay_applied", **decay_stats)
+
         # Save graph and state
         self.engine.save()
         state["processed_files"] = processed_files

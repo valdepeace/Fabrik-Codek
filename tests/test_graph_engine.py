@@ -1,6 +1,7 @@
 """Tests for GraphEngine and graph schema."""
 
 import tempfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -580,3 +581,152 @@ class TestPruning:
         # Higher threshold removes the edge
         result_strict = engine.prune(min_edge_weight=0.5, dry_run=True)
         assert result_strict["edges_removed"] == 1
+
+
+# --- Timestamps ---
+
+
+class TestTimestamps:
+    def test_add_entity_sets_last_seen(self, engine):
+        entity = Entity(id="t1", name="fastapi", entity_type=EntityType.TECHNOLOGY)
+        result = engine.add_entity(entity)
+        assert "last_seen" in result.metadata
+        # Should be a valid ISO timestamp
+        datetime.fromisoformat(result.metadata["last_seen"])
+
+    def test_merge_entity_updates_last_seen(self, engine):
+        e1 = Entity(id="t1", name="fastapi", entity_type=EntityType.TECHNOLOGY)
+        result1 = engine.add_entity(e1)
+        first_seen = result1.metadata["last_seen"]
+
+        e2 = Entity(id="t1", name="fastapi", entity_type=EntityType.TECHNOLOGY)
+        result2 = engine.add_entity(e2)
+        second_seen = result2.metadata["last_seen"]
+        assert second_seen >= first_seen
+
+    def test_add_relation_sets_timestamps(self, engine):
+        engine.add_entity(Entity(id="a", name="a", entity_type=EntityType.TECHNOLOGY))
+        engine.add_entity(Entity(id="b", name="b", entity_type=EntityType.TECHNOLOGY))
+        engine.add_relation(Relation(
+            source_id="a", target_id="b",
+            relation_type=RelationType.USES, weight=0.7,
+        ))
+        edge_data = engine._graph.edges["a", "b"]
+        meta = edge_data["metadata"]
+        assert meta["base_weight"] == 0.7
+        assert "last_reinforced" in meta
+        datetime.fromisoformat(meta["last_reinforced"])
+
+    def test_reinforce_relation_updates_timestamps(self, engine):
+        engine.add_entity(Entity(id="a", name="a", entity_type=EntityType.TECHNOLOGY))
+        engine.add_entity(Entity(id="b", name="b", entity_type=EntityType.TECHNOLOGY))
+
+        engine.add_relation(Relation(
+            source_id="a", target_id="b",
+            relation_type=RelationType.USES, weight=0.5,
+        ))
+        first_meta = dict(engine._graph.edges["a", "b"]["metadata"])
+
+        engine.add_relation(Relation(
+            source_id="a", target_id="b",
+            relation_type=RelationType.USES, weight=0.5,
+        ))
+        second_meta = engine._graph.edges["a", "b"]["metadata"]
+
+        # base_weight should be updated to the new reinforced weight
+        assert second_meta["base_weight"] == 0.6  # 0.5 + 0.1
+        assert second_meta["last_reinforced"] >= first_meta["last_reinforced"]
+
+
+# --- Temporal Decay ---
+
+
+class TestDecay:
+    def _make_edge_with_age(self, engine, weight, days_ago, src="a", tgt="b"):
+        """Helper: create an edge that was last reinforced `days_ago` days ago."""
+        engine.add_entity(Entity(id=src, name=src, entity_type=EntityType.TECHNOLOGY))
+        engine.add_entity(Entity(id=tgt, name=tgt, entity_type=EntityType.TECHNOLOGY))
+        past = datetime.now(tz=timezone.utc) - timedelta(days=days_ago)
+        engine._graph.add_edge(
+            src, tgt,
+            source_id=src, target_id=tgt,
+            relation_type=RelationType.USES.value,
+            weight=weight,
+            source_docs=[],
+            metadata={
+                "base_weight": weight,
+                "last_reinforced": past.isoformat(),
+            },
+        )
+
+    def test_apply_decay_reduces_weights(self, engine):
+        self._make_edge_with_age(engine, weight=1.0, days_ago=30)
+        result = engine.apply_decay(half_life_days=90.0)
+        assert result["edges_decayed"] == 1
+        new_weight = engine._graph.edges["a", "b"]["weight"]
+        assert new_weight < 1.0
+
+    def test_apply_decay_idempotent(self, engine):
+        self._make_edge_with_age(engine, weight=0.8, days_ago=45)
+        ref_time = datetime.now(tz=timezone.utc)
+
+        engine.apply_decay(half_life_days=90.0, reference_time=ref_time)
+        weight_after_first = engine._graph.edges["a", "b"]["weight"]
+
+        engine.apply_decay(half_life_days=90.0, reference_time=ref_time)
+        weight_after_second = engine._graph.edges["a", "b"]["weight"]
+
+        assert abs(weight_after_first - weight_after_second) < 1e-9
+
+    def test_apply_decay_skips_legacy_edges(self, engine):
+        """Edges without last_reinforced timestamp are skipped."""
+        engine.add_entity(Entity(id="a", name="a", entity_type=EntityType.TECHNOLOGY))
+        engine.add_entity(Entity(id="b", name="b", entity_type=EntityType.TECHNOLOGY))
+        engine._graph.add_edge(
+            "a", "b",
+            source_id="a", target_id="b",
+            relation_type=RelationType.USES.value,
+            weight=0.5,
+            source_docs=[],
+            metadata={},
+        )
+        result = engine.apply_decay(half_life_days=90.0)
+        assert result["edges_skipped"] == 1
+        assert result["edges_decayed"] == 0
+        # Weight unchanged
+        assert engine._graph.edges["a", "b"]["weight"] == 0.5
+
+    def test_apply_decay_respects_half_life(self, engine):
+        """At exactly 1 half-life, weight should be ~50% of base."""
+        self._make_edge_with_age(engine, weight=1.0, days_ago=90)
+        engine.apply_decay(half_life_days=90.0)
+        new_weight = engine._graph.edges["a", "b"]["weight"]
+        assert abs(new_weight - 0.5) < 0.01
+
+    def test_apply_decay_dry_run(self, engine):
+        self._make_edge_with_age(engine, weight=1.0, days_ago=90)
+        result = engine.apply_decay(half_life_days=90.0, dry_run=True)
+        assert result["edges_decayed"] == 1
+        # Weight should NOT have changed
+        assert engine._graph.edges["a", "b"]["weight"] == 1.0
+
+    def test_apply_decay_fresh_edges_no_decay(self, engine):
+        """Edge created just now should have negligible decay."""
+        self._make_edge_with_age(engine, weight=0.8, days_ago=0)
+        engine.apply_decay(half_life_days=90.0)
+        new_weight = engine._graph.edges["a", "b"]["weight"]
+        assert abs(new_weight - 0.8) < 0.01
+
+    def test_decay_then_prune_removes_stale(self, engine):
+        """Old edge decays below threshold, prune removes edge + orphan entities."""
+        self._make_edge_with_age(engine, weight=0.5, days_ago=365)
+
+        engine.apply_decay(half_life_days=90.0)
+        decayed_weight = engine._graph.edges["a", "b"]["weight"]
+        assert decayed_weight < 0.3  # Should be well below prune threshold
+
+        result = engine.prune(min_edge_weight=0.3)
+        assert result["edges_removed"] == 1
+        assert result["entities_removed"] == 2
+        assert engine.get_entity("a") is None
+        assert engine.get_entity("b") is None

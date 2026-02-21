@@ -2,7 +2,7 @@
 
 import json
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import networkx as nx
@@ -49,6 +49,7 @@ class GraphEngine:
 
     def add_entity(self, entity: Entity) -> Entity:
         """Add or merge an entity into the graph."""
+        now_iso = datetime.now(tz=timezone.utc).isoformat()
         existing = self._entities.get(entity.id)
         if existing:
             # Merge: combine source_docs, aliases, increment count
@@ -61,9 +62,11 @@ class GraphEngine:
                     existing.aliases.append(alias)
             if entity.description and not existing.description:
                 existing.description = entity.description
+            existing.metadata["last_seen"] = now_iso
             self._graph.nodes[existing.id].update(existing.to_dict())
             return existing
 
+        entity.metadata["last_seen"] = now_iso
         self._entities[entity.id] = entity
         self._graph.add_node(entity.id, **entity.to_dict())
         return entity
@@ -109,12 +112,19 @@ class GraphEngine:
         if relation.source_id not in self._entities or relation.target_id not in self._entities:
             return
 
+        now_iso = datetime.now(tz=timezone.utc).isoformat()
         edge_key = (relation.source_id, relation.target_id)
         if self._graph.has_edge(*edge_key):
             edge_data = self._graph.edges[edge_key]
             # Reinforce weight (cap at 1.0)
             current_weight = edge_data.get("weight", 0.5)
-            edge_data["weight"] = min(1.0, current_weight + 0.1)
+            new_weight = min(1.0, current_weight + 0.1)
+            edge_data["weight"] = new_weight
+            # Update decay timestamps
+            edge_meta = edge_data.get("metadata", {})
+            edge_meta["base_weight"] = new_weight
+            edge_meta["last_reinforced"] = now_iso
+            edge_data["metadata"] = edge_meta
             # Merge source_docs
             existing_docs = edge_data.get("source_docs", [])
             for doc in relation.source_docs:
@@ -122,6 +132,8 @@ class GraphEngine:
                     existing_docs.append(doc)
             edge_data["source_docs"] = existing_docs
         else:
+            relation.metadata["base_weight"] = relation.weight
+            relation.metadata["last_reinforced"] = now_iso
             self._graph.add_edge(
                 relation.source_id,
                 relation.target_id,
@@ -445,6 +457,66 @@ class GraphEngine:
                 )
 
         return stats
+
+    # --- Temporal Decay ---
+
+    def apply_decay(
+        self,
+        half_life_days: float = 90.0,
+        reference_time: datetime | None = None,
+        dry_run: bool = False,
+    ) -> dict:
+        """Apply exponential decay to edge weights based on time since last reinforcement.
+
+        Computes weight = base_weight * 0.5^(days_elapsed / half_life_days).
+        Idempotent: always recomputes from base_weight, never compounds.
+
+        Args:
+            half_life_days: Days for weight to halve.
+            reference_time: Reference point for age calculation (default: now UTC).
+            dry_run: If True, compute stats without modifying weights.
+
+        Returns:
+            Stats dict with edges_decayed, edges_skipped, min/max weight.
+        """
+        ref = reference_time or datetime.now(tz=timezone.utc)
+        edges_decayed = 0
+        edges_skipped = 0
+        min_weight = float("inf")
+        max_weight = 0.0
+
+        for _src, _tgt, data in self._graph.edges(data=True):
+            meta = data.get("metadata", {})
+            last_reinforced = meta.get("last_reinforced")
+            if not last_reinforced:
+                edges_skipped += 1
+                continue
+
+            lr_dt = datetime.fromisoformat(last_reinforced)
+            days_elapsed = (ref - lr_dt).total_seconds() / 86400.0
+            if days_elapsed < 0:
+                days_elapsed = 0.0
+
+            decay_factor = 0.5 ** (days_elapsed / half_life_days)
+            base_weight = meta.get("base_weight", data.get("weight", 0.5))
+            new_weight = base_weight * decay_factor
+
+            if not dry_run:
+                data["weight"] = new_weight
+
+            min_weight = min(min_weight, new_weight)
+            max_weight = max(max_weight, new_weight)
+            edges_decayed += 1
+
+        if edges_decayed == 0:
+            min_weight = 0.0
+
+        return {
+            "edges_decayed": edges_decayed,
+            "edges_skipped": edges_skipped,
+            "min_weight_after": round(min_weight, 6),
+            "max_weight_after": round(max_weight, 6),
+        }
 
     # --- Persistence ---
 

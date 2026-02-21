@@ -63,6 +63,7 @@ class Settings(BaseSettings):
     graph_graph_weight: float = 0.4
     graph_default_depth: int = 2
     graph_min_weight: float = 0.3
+    graph_decay_half_life_days: float = 90.0
 
     # Full-text search (Meilisearch) - optional
     meilisearch_url: str = "http://localhost:7700"

@@ -1832,6 +1832,7 @@ class TestPipelineWithTranscripts:
 
         with patch("src.knowledge.extraction.pipeline.settings") as mock_settings:
             mock_settings.datalake_path = datalake
+            mock_settings.graph_decay_half_life_days = 90.0
 
             pipeline = ExtractionPipeline(engine=engine, use_llm=False, include_transcripts=True)
             stats = asyncio.run(pipeline.build(force=True, transcripts_dir=transcripts_dir))
@@ -1850,6 +1851,7 @@ class TestPipelineWithTranscripts:
 
         with patch("src.knowledge.extraction.pipeline.settings") as mock_settings:
             mock_settings.datalake_path = datalake
+            mock_settings.graph_decay_half_life_days = 90.0
 
             pipeline = ExtractionPipeline(engine=engine, use_llm=False)
             assert pipeline.transcript_extractor is None
@@ -1879,6 +1881,7 @@ class TestPipelineWithTranscripts:
 
         with patch("src.knowledge.extraction.pipeline.settings") as mock_settings:
             mock_settings.datalake_path = datalake
+            mock_settings.graph_decay_half_life_days = 90.0
 
             pipeline = ExtractionPipeline(engine=engine, use_llm=False, include_transcripts=True)
             stats = asyncio.run(pipeline.build(force=True, transcripts_dir=transcripts_dir))
@@ -1913,6 +1916,7 @@ class TestPipelineWithTranscripts:
 
         with patch("src.knowledge.extraction.pipeline.settings") as mock_settings:
             mock_settings.datalake_path = datalake
+            mock_settings.graph_decay_half_life_days = 90.0
 
             pipeline = ExtractionPipeline(engine=engine, use_llm=False, include_transcripts=True)
 
@@ -2098,6 +2102,7 @@ class TestGraphCompletion:
 
         with patch("src.knowledge.extraction.pipeline.settings") as mock_settings:
             mock_settings.datalake_path = tmp_dir / "datalake"
+            mock_settings.graph_decay_half_life_days = 90.0
 
             pipeline = ExtractionPipeline(engine=engine, use_llm=False)
             stats = asyncio.run(pipeline.build(force=True))

@@ -5,6 +5,21 @@ All notable changes to Fabrik-Codek are documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Graph Temporal Decay** — Exponential weight decay for knowledge graph edges (FC-39)
+  - Edges store `base_weight` and `last_reinforced` timestamps; entities store `last_seen`
+  - `apply_decay()`: idempotent formula `weight = base_weight * 0.5^(days/half_life)`
+  - Integrated into pipeline build (runs after graph completion, before save)
+  - CLI: `fabrik graph decay --dry-run --half-life 90`
+  - Config: `FABRIK_GRAPH_DECAY_HALF_LIFE_DAYS` (default: 90)
+  - 11 new tests (4 timestamps + 7 decay including idempotency and prune integration)
+- **Competence Model** — Knowledge depth scoring per topic (FC-36)
+  - `CompetenceBuilder` analyzes 3 signals: entry count (log scale), entity density (graph), recency (exponential decay)
+  - 4 adaptive weight sets with graceful degradation when signals are missing
+  - Competence levels: Expert (>=0.8), Competent (>=0.4), Novice (>=0.1), Unknown (<0.1)
+  - System prompt injection: competence fragment appended after Personal Profile
+  - CLI: `fabrik competence build` and `fabrik competence show`
+  - Persistence with JSON caching (`data/profile/competence_map.json`)
+  - 89 new tests
 - **Meilisearch full-text search** — Optional BM25-style keyword search as third retrieval tier
   - `FullTextEngine` async wrapper using httpx (no new dependencies)
   - Three-tier Reciprocal Rank Fusion (RRF): vector + graph + fulltext
@@ -19,7 +34,7 @@ All notable changes to Fabrik-Codek are documented in this file.
 - All CLI messages, prompts, and logger errors translated from Spanish to English
 - `HybridRAGEngine._rrf_fusion()` extended to accept optional fulltext results
 - Multi-source origin tracking: results found in multiple sources tagged as `"hybrid"`
-- Test count: 472 → 527
+- Test count: 527 → 648
 
 ## [1.2.1] - 2026-02-19
 

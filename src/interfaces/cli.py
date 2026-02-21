@@ -426,7 +426,7 @@ def rag(
 
 @app.command()
 def graph(
-    action: str = typer.Argument("stats", help="Action: build, search, stats"),
+    action: str = typer.Argument("stats", help="Action: build, search, stats, complete, prune, decay"),
     query: Optional[str] = typer.Option(None, "--query", "-q", help="Search query"),
     depth: int = typer.Option(2, "--depth", "-d", help="Traversal depth for search"),
     use_llm: bool = typer.Option(False, "--use-llm", help="Enable LLM extraction (requires Ollama)"),
@@ -438,7 +438,8 @@ def graph(
     min_mentions: int = typer.Option(1, "--min-mentions", help="Min mention_count to keep isolated entities"),
     min_weight: float = typer.Option(0.3, "--min-weight", help="Min edge weight to keep"),
     keep_inferred: bool = typer.Option(False, "--keep-inferred", help="Preserve inferred edges during prune"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Preview prune without modifying"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview without modifying"),
+    half_life: float = typer.Option(90.0, "--half-life", help="Decay half-life in days"),
 ):
     """Knowledge Graph - build, search, and inspect."""
     from src.knowledge.graph_engine import GraphEngine
@@ -611,8 +612,38 @@ def graph(
             if len(result["removed_entities"]) > 20:
                 console.print(f"  [dim]... y {len(result['removed_entities']) - 20} mas[/dim]")
 
+    elif action == "decay":
+        if not engine.load():
+            console.print("[yellow]No hay Knowledge Graph construido.[/yellow]")
+            console.print("[dim]Ejecuta: fabrik graph build[/dim]")
+            return
+
+        before_stats = engine.get_stats()
+        result = engine.apply_decay(half_life_days=half_life, dry_run=dry_run)
+
+        if not dry_run:
+            engine.save()
+
+        title = (
+            "[bold yellow]Graph Decay Preview (dry-run)[/bold yellow]"
+            if dry_run
+            else "[bold green]Graph Decay Applied[/bold green]"
+        )
+        console.print(Panel.fit(title))
+
+        table = Table()
+        table.add_column("Metrica", style="cyan")
+        table.add_column("Valor", style="green")
+        table.add_row("Edges totales", str(before_stats["edge_count"]))
+        table.add_row("Edges decayed", str(result["edges_decayed"]))
+        table.add_row("Edges skipped (legacy)", str(result["edges_skipped"]))
+        table.add_row("Min weight after", f"{result['min_weight_after']:.6f}")
+        table.add_row("Max weight after", f"{result['max_weight_after']:.6f}")
+        table.add_row("Half-life", f"{half_life} days")
+        console.print(table)
+
     else:
-        console.print("[yellow]Uso: graph build | graph search -q 'query' | graph stats | graph complete | graph prune[/yellow]")
+        console.print("[yellow]Uso: graph build | search | stats | complete | prune | decay[/yellow]")
 
 
 @app.command()
