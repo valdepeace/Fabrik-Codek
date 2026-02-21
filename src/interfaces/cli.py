@@ -1307,6 +1307,52 @@ def competence(
         console.print("[yellow]Usage:[/yellow] fabrik competence [show|build]")
 
 
+@app.command()
+def router(
+    action: str = typer.Argument("test", help="Action: test"),
+    query: str = typer.Option(..., "--query", "-q", help="Query to classify"),
+):
+    """Test the adaptive task router — inspect classification without executing."""
+    from src.config import settings
+    from src.core.competence_model import get_active_competence_map
+    from src.core.personal_profile import get_active_profile
+    from src.core.task_router import TaskRouter
+
+    active_profile = get_active_profile()
+    competence_map = get_active_competence_map()
+    task_router = TaskRouter(competence_map, active_profile, settings)
+
+    async def run():
+        decision = await task_router.route(query)
+
+        table = Table(title="Routing Decision")
+        table.add_column("Field", style="bold cyan")
+        table.add_column("Value", style="green")
+        table.add_row("Query", query)
+        table.add_row("Task Type", f"{decision.task_type} ({decision.classification_method})")
+        table.add_row(
+            "Topic",
+            f"{decision.topic} ({decision.competence_level}, score={competence_map.get_score(decision.topic):.2f})"
+            if decision.topic else "— (Unknown)",
+        )
+        table.add_row("Model", decision.model)
+        table.add_row(
+            "Strategy",
+            f"graph_depth={decision.strategy.graph_depth}, "
+            f"vector={decision.strategy.vector_weight}, "
+            f"graph={decision.strategy.graph_weight}",
+        )
+        console.print(table)
+
+        console.print(f"\n[dim]System prompt:[/dim]")
+        console.print(f"[italic]{decision.system_prompt}[/italic]")
+
+    if action == "test":
+        async_run(run())
+    else:
+        console.print("[yellow]Usage:[/yellow] fabrik router test -q 'your query'")
+
+
 @app.callback()
 def main():
     """Fabrik-Codek: Claude Code's little brother 🤖"""
