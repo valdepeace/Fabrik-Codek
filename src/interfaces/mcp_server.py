@@ -96,12 +96,26 @@ async def lifespan(server: FastMCP):
     else:
         _state["hybrid"] = None
 
+    # 6. Task Router
+    try:
+        from src.core.personal_profile import get_active_profile
+        from src.core.competence_model import get_active_competence_map
+        from src.core.task_router import TaskRouter
+
+        profile = get_active_profile()
+        competence_map = get_active_competence_map()
+        _state["router"] = TaskRouter(competence_map, profile, settings)
+    except Exception as exc:
+        logger.warning("mcp_router_init_failed", error=str(exc))
+        _state["router"] = None
+
     logger.info(
         "mcp_startup_complete",
         ollama=_state.get("ollama_ok"),
         rag=_state.get("rag") is not None,
         graph=_state.get("graph") is not None,
         fulltext=_state.get("fulltext") is not None,
+        router=_state.get("router") is not None,
     )
 
     yield
@@ -272,6 +286,11 @@ async def fabrik_ask(
     if not ollama_ok:
         return json.dumps({"error": "Ollama is not available"})
 
+    # Route the query
+    router = _state.get("router")
+    decision = await router.route(prompt) if router else None
+    effective_depth = decision.strategy.graph_depth if decision else graph_depth
+
     effective_prompt = prompt
     sources: list[dict] = []
 
@@ -279,7 +298,7 @@ async def fabrik_ask(
     if use_graph and _state.get("hybrid"):
         try:
             results = await _state["hybrid"].retrieve(
-                prompt, limit=5, graph_depth=graph_depth,
+                prompt, limit=5, graph_depth=effective_depth,
             )
             if results:
                 context = "\n---\n".join(
@@ -323,7 +342,11 @@ async def fabrik_ask(
             logger.warning("mcp_rag_retrieve_failed", error=str(exc))
 
     try:
-        response = await llm.generate(effective_prompt, model=model)
+        response = await llm.generate(
+            effective_prompt,
+            model=decision.model if decision else model,
+            system=decision.system_prompt if decision else None,
+        )
     except Exception as exc:
         return json.dumps({"error": f"LLM generation failed: {exc}"})
 
@@ -333,6 +356,12 @@ async def fabrik_ask(
         "tokens_used": response.tokens_used,
         "latency_ms": response.latency_ms,
         "sources": sources,
+        "routing": {
+            "task_type": decision.task_type,
+            "topic": decision.topic,
+            "competence": decision.competence_level,
+            "method": decision.classification_method,
+        } if decision else None,
     }
     return json.dumps(result)
 
