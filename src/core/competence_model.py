@@ -30,11 +30,17 @@ ENTRY_CEILING = 100
 MAX_EDGES_CEILING = 100
 RECENCY_HALF_LIFE_DAYS = 30
 
-# Weight sets for composite score calculation.
-WEIGHTS_ALL: dict[str, float] = {"entry": 0.5, "density": 0.3, "recency": 0.2}
-WEIGHTS_NO_GRAPH: dict[str, float] = {"entry": 0.7, "recency": 0.3}
-WEIGHTS_NO_RECENCY: dict[str, float] = {"entry": 0.6, "density": 0.4}
-WEIGHTS_ENTRY_ONLY: dict[str, float] = {"entry": 0.8}
+# Weight sets for composite score calculation (with outcome signal).
+WEIGHTS_ALL: dict[str, float] = {"entry": 0.30, "density": 0.25, "recency": 0.20, "outcome": 0.25}
+WEIGHTS_NO_GRAPH: dict[str, float] = {"entry": 0.40, "recency": 0.30, "outcome": 0.30}
+WEIGHTS_NO_RECENCY: dict[str, float] = {"entry": 0.40, "density": 0.30, "outcome": 0.30}
+WEIGHTS_ENTRY_ONLY: dict[str, float] = {"entry": 0.60, "outcome": 0.40}
+
+# Fallback weight sets when no outcome data exists (original values).
+WEIGHTS_ALL_NO_OUTCOME: dict[str, float] = {"entry": 0.5, "density": 0.3, "recency": 0.2}
+WEIGHTS_NO_GRAPH_NO_OUTCOME: dict[str, float] = {"entry": 0.7, "recency": 0.3}
+WEIGHTS_NO_RECENCY_NO_OUTCOME: dict[str, float] = {"entry": 0.6, "density": 0.4}
+WEIGHTS_ENTRY_ONLY_NO_OUTCOME: dict[str, float] = {"entry": 1.0}
 
 
 def _classify_level(score: float) -> str:
@@ -258,15 +264,15 @@ def compute_competence_score(
     edge_count: int | None,
     last_activity_iso: str,
     reference_time: datetime | None = None,
+    outcome_rate: float | None = None,
 ) -> tuple[float, float, float, float]:
     """Compute a weighted competence score from available signals.
 
-    Selects the weight set based on which signals are present:
-
-    * ``edge_count is not None`` and ``last_activity_iso`` non-empty -> WEIGHTS_ALL
-    * ``edge_count is None`` and ``last_activity_iso`` non-empty    -> WEIGHTS_NO_GRAPH
-    * ``edge_count is not None`` and ``last_activity_iso`` empty     -> WEIGHTS_NO_RECENCY
-    * both missing                                                   -> WEIGHTS_ENTRY_ONLY
+    Selects the weight set based on which signals are present.  When
+    ``outcome_rate`` is provided the weight sets that include the
+    outcome dimension are used; otherwise the NO_OUTCOME fallback sets
+    (identical to the original weights) are selected for graceful
+    degradation.
 
     Returns ``(final_score, entry_s, density_s, recency_s)``.
     """
@@ -274,23 +280,25 @@ def compute_competence_score(
 
     has_graph = edge_count is not None
     has_recency = bool(last_activity_iso and last_activity_iso.strip())
+    has_outcome = outcome_rate is not None
 
     density_s = compute_entity_density(edge_count, MAX_EDGES_CEILING) if has_graph else 0.0
     recency_s = compute_recency_weight(last_activity_iso, reference_time) if has_recency else 0.0
 
     if has_graph and has_recency:
-        weights = WEIGHTS_ALL
+        weights = WEIGHTS_ALL if has_outcome else WEIGHTS_ALL_NO_OUTCOME
     elif not has_graph and has_recency:
-        weights = WEIGHTS_NO_GRAPH
+        weights = WEIGHTS_NO_GRAPH if has_outcome else WEIGHTS_NO_GRAPH_NO_OUTCOME
     elif has_graph and not has_recency:
-        weights = WEIGHTS_NO_RECENCY
+        weights = WEIGHTS_NO_RECENCY if has_outcome else WEIGHTS_NO_RECENCY_NO_OUTCOME
     else:
-        weights = WEIGHTS_ENTRY_ONLY
+        weights = WEIGHTS_ENTRY_ONLY if has_outcome else WEIGHTS_ENTRY_ONLY_NO_OUTCOME
 
     final_score = (
         weights.get("entry", 0.0) * entry_s
         + weights.get("density", 0.0) * density_s
-        + weights.get("recency", 0.0) * recency_s
+        + weights.get("recency", 0.0) * (recency_s or 0.0)
+        + weights.get("outcome", 0.0) * (outcome_rate or 0.0)
     )
 
     return (final_score, entry_s, density_s, recency_s)
@@ -425,6 +433,58 @@ class CompetenceBuilder:
 
         return latest
 
+    # -- outcome rates ------------------------------------------------------
+
+    def _get_outcome_rates(self, topics: list[str]) -> dict[str, float]:
+        """Read outcomes and compute acceptance rate per topic.
+
+        Scans all ``*_outcomes.jsonl`` files from
+        ``datalake_path / "01-raw" / "outcomes"``.  Each record is
+        expected to have ``topic`` and ``outcome`` fields where outcome
+        is one of ``"accepted"``, ``"rejected"``, or ``"neutral"``.
+
+        Neutral outcomes are ignored.  Returns the acceptance rate
+        (accepted / non-neutral total) only for topics with at least 5
+        non-neutral outcomes.
+        """
+        outcomes_dir = self.datalake_path / "01-raw" / "outcomes"
+        if not outcomes_dir.exists():
+            return {}
+
+        topic_set = {t.lower() for t in topics}
+        # Map lowercase topic -> {"accepted": int, "rejected": int}
+        counts: dict[str, dict[str, int]] = {}
+
+        for jsonl_file in sorted(outcomes_dir.glob("*_outcomes.jsonl")):
+            records = self.analyzer._read_jsonl(jsonl_file)
+            for record in records:
+                topic_raw = record.get("topic", "")
+                outcome = record.get("outcome", "")
+                if not topic_raw or not outcome:
+                    continue
+                topic_lower = topic_raw.lower()
+                if topic_lower not in topic_set:
+                    continue
+                if outcome == "neutral":
+                    continue
+
+                if topic_lower not in counts:
+                    counts[topic_lower] = {"accepted": 0, "rejected": 0}
+
+                if outcome == "accepted":
+                    counts[topic_lower]["accepted"] += 1
+                elif outcome == "rejected":
+                    counts[topic_lower]["rejected"] += 1
+
+        min_outcomes = 5
+        result: dict[str, float] = {}
+        for topic_lower, c in counts.items():
+            total = c["accepted"] + c["rejected"]
+            if total >= min_outcomes:
+                result[topic_lower] = c["accepted"] / total
+
+        return result
+
     # -- helpers ------------------------------------------------------------
 
     @staticmethod
@@ -498,6 +558,7 @@ class CompetenceBuilder:
         # Gather signals
         edge_counts = self._get_topic_edge_counts(topic_list) if self.graph is not None else {}
         recency = self._get_topic_recency(topic_list)
+        outcome_rates = self._get_outcome_rates(topic_list)
 
         # Score each topic
         entries_list: list[CompetenceEntry] = []
@@ -505,11 +566,13 @@ class CompetenceBuilder:
             count = entry_counts.get(topic, 0)
             edge_count = edge_counts.get(topic)  # None if not in graph
             last_activity = recency.get(topic, "")
+            topic_outcome = outcome_rates.get(topic.lower())
 
             final_score, entry_s, density_s, recency_s = compute_competence_score(
                 entries=count,
                 edge_count=edge_count,
                 last_activity_iso=last_activity,
+                outcome_rate=topic_outcome,
             )
 
             level = _classify_level(final_score)

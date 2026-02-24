@@ -3,6 +3,7 @@
 import asyncio
 from pathlib import Path
 from typing import Optional
+from uuid import uuid4
 
 import typer
 from rich.console import Console
@@ -70,8 +71,11 @@ def chat(
             competence_map = get_active_competence_map()
             router = TaskRouter(competence_map, active_profile, settings)
 
+            from src.flywheel.outcome_tracker import OutcomeTracker
+            tracker = OutcomeTracker(settings.datalake_path, str(uuid4()))
+
+            initial_decision = await router.route("general conversation")
             if not system:
-                initial_decision = await router.route("general conversation")
                 messages.insert(0, {"role": "system", "content": initial_decision.system_prompt})
 
             while True:
@@ -118,6 +122,23 @@ def chat(
                     latency_ms=response.latency_ms,
                     interaction_type="prompt_response",
                 )
+
+                # Track outcome
+                tracker.record_turn(
+                    query=user_input,
+                    response=response.content,
+                    decision=initial_decision,
+                    latency_ms=response.latency_ms,
+                )
+
+        tracker.close_session()
+        stats = tracker.get_session_stats()
+        if stats["total"] > 0:
+            console.print(
+                f"[dim]Outcomes: {stats['total']} tracked "
+                f"({stats['accepted']} accepted, "
+                f"{stats['rejected']} rejected)[/dim]"
+            )
 
         await collector.close()
 
@@ -234,6 +255,17 @@ Responde usando el contexto cuando sea relevante."""
                 context=context,
             )
             await collector.close()
+
+            # Track outcome
+            from src.flywheel.outcome_tracker import OutcomeTracker
+            ot = OutcomeTracker(settings.datalake_path, str(uuid4()))
+            ot.record_turn(
+                query=prompt,
+                response=response.content,
+                decision=decision,
+                latency_ms=response.latency_ms,
+            )
+            ot.close_session()
 
     async_run(run())
 
@@ -1273,6 +1305,16 @@ def competence(
         console.print(table)
         console.print(f"\n[dim]Saved to: {competence_path}[/dim]")
 
+        # Generate strategy overrides from outcome data
+        from src.core.strategy_optimizer import StrategyOptimizer
+        optimizer = StrategyOptimizer(settings.datalake_path)
+        overrides_path = settings.data_dir / "profile" / "strategy_overrides.json"
+        override_count = optimizer.save_overrides(overrides_path)
+        if override_count > 0:
+            console.print(f"[bold]Strategy overrides:[/bold] {override_count} generated")
+        else:
+            console.print("[dim]No strategy overrides needed (all acceptance rates OK)[/dim]")
+
     elif action == "show":
         loaded = load_competence_map(competence_path)
         if not loaded.topics:
@@ -1305,6 +1347,139 @@ def competence(
 
     else:
         console.print("[yellow]Usage:[/yellow] fabrik competence [show|build]")
+
+
+@app.command()
+def outcomes(
+    action: str = typer.Argument("stats", help="Action: show or stats"),
+    topic: Optional[str] = typer.Option(None, "--topic", "-t", help="Filter by topic"),
+    task_type: Optional[str] = typer.Option(None, "--task-type", help="Filter by task type"),
+    limit: int = typer.Option(20, "--limit", "-n", help="Number of records"),
+):
+    """View outcome tracking data."""
+    import json as json_mod
+    from src.config import settings
+
+    outcomes_dir = settings.datalake_path / "01-raw" / "outcomes"
+
+    # Read all outcome records
+    records: list[dict] = []
+    if outcomes_dir.exists():
+        for filepath in sorted(outcomes_dir.glob("*_outcomes.jsonl")):
+            for line in filepath.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    records.append(json_mod.loads(line))
+                except json_mod.JSONDecodeError:
+                    continue
+
+    # Apply filters
+    if topic:
+        records = [r for r in records if r.get("topic") == topic]
+    if task_type:
+        records = [r for r in records if r.get("task_type") == task_type]
+
+    if action == "show":
+        if not records:
+            console.print("[yellow]No outcome records found.[/yellow]")
+            return
+
+        display = records[-limit:]
+
+        table = Table(title="Outcome Records")
+        table.add_column("Time", style="dim")
+        table.add_column("Task Type", style="cyan")
+        table.add_column("Topic")
+        table.add_column("Outcome")
+        table.add_column("Reason", style="dim")
+
+        for r in display:
+            ts = r.get("timestamp", "")[:19]
+            outcome = r.get("outcome", "neutral")
+            if outcome == "accepted":
+                outcome_style = f"[green]{outcome}[/green]"
+            elif outcome == "rejected":
+                outcome_style = f"[red]{outcome}[/red]"
+            else:
+                outcome_style = f"[dim]{outcome}[/dim]"
+
+            table.add_row(
+                ts,
+                r.get("task_type", "—"),
+                r.get("topic") or "—",
+                outcome_style,
+                r.get("inference_reason", "")[:50],
+            )
+
+        console.print(table)
+        console.print(f"[dim]Showing {len(display)} of {len(records)} records[/dim]")
+
+    elif action == "stats":
+        if not records:
+            console.print("[yellow]No outcome records found.[/yellow]")
+            return
+
+        # Aggregate by (task_type, topic)
+        buckets: dict[tuple[str, str], dict] = {}
+        for r in records:
+            key = (r.get("task_type", "general"), r.get("topic") or "—")
+            if key not in buckets:
+                buckets[key] = {"total": 0, "accepted": 0}
+            outcome = r.get("outcome", "neutral")
+            if outcome != "neutral":
+                buckets[key]["total"] += 1
+                if outcome == "accepted":
+                    buckets[key]["accepted"] += 1
+
+        table = Table(title="Outcome Stats")
+        table.add_column("Task Type", style="cyan")
+        table.add_column("Topic")
+        table.add_column("Total", justify="right")
+        table.add_column("Accepted", justify="right", style="green")
+        table.add_column("Rate", justify="right")
+
+        overall_total = 0
+        overall_accepted = 0
+
+        for (tt, tp), agg in sorted(buckets.items()):
+            if agg["total"] == 0:
+                continue
+            rate = agg["accepted"] / agg["total"]
+            table.add_row(
+                tt,
+                tp,
+                str(agg["total"]),
+                str(agg["accepted"]),
+                f"{rate:.0%}",
+            )
+            overall_total += agg["total"]
+            overall_accepted += agg["accepted"]
+
+        if overall_total > 0:
+            overall_rate = overall_accepted / overall_total
+            table.add_row(
+                "[bold]TOTAL[/bold]",
+                "",
+                f"[bold]{overall_total}[/bold]",
+                f"[bold]{overall_accepted}[/bold]",
+                f"[bold]{overall_rate:.0%}[/bold]",
+            )
+
+        console.print(table)
+
+        # Show strategy overrides count
+        overrides_path = settings.data_dir / "profile" / "strategy_overrides.json"
+        if overrides_path.exists():
+            try:
+                overrides = json_mod.loads(overrides_path.read_text(encoding="utf-8"))
+                console.print(f"[dim]Strategy overrides: {len(overrides)} active[/dim]")
+            except (json_mod.JSONDecodeError, OSError):
+                pass
+
+    else:
+        console.print("[yellow]Usage:[/yellow] fabrik outcomes [show|stats] [--topic X] [--task-type X]")
 
 
 @app.command()

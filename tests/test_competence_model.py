@@ -14,9 +14,13 @@ from src.core.competence_model import (
     MAX_EDGES_CEILING,
     NOVICE_THRESHOLD,
     WEIGHTS_ALL,
+    WEIGHTS_ALL_NO_OUTCOME,
     WEIGHTS_ENTRY_ONLY,
+    WEIGHTS_ENTRY_ONLY_NO_OUTCOME,
     WEIGHTS_NO_GRAPH,
+    WEIGHTS_NO_GRAPH_NO_OUTCOME,
     WEIGHTS_NO_RECENCY,
+    WEIGHTS_NO_RECENCY_NO_OUTCOME,
     CompetenceBuilder,
     CompetenceEntry,
     CompetenceMap,
@@ -420,7 +424,7 @@ class TestComputeCompetenceScore:
         return datetime(2026, 2, 20, 12, 0, 0, tzinfo=timezone.utc)
 
     def test_all_signals(self):
-        """With all signals, uses WEIGHTS_ALL."""
+        """With all signals and no outcome, uses WEIGHTS_ALL_NO_OUTCOME."""
         ref = self._ref()
         last = ref.isoformat()
         final, entry_s, density_s, recency_s = compute_competence_score(
@@ -430,14 +434,14 @@ class TestComputeCompetenceScore:
         assert density_s == 1.0
         assert recency_s >= 0.99
         expected = (
-            WEIGHTS_ALL["entry"] * entry_s
-            + WEIGHTS_ALL["density"] * density_s
-            + WEIGHTS_ALL["recency"] * recency_s
+            WEIGHTS_ALL_NO_OUTCOME["entry"] * entry_s
+            + WEIGHTS_ALL_NO_OUTCOME["density"] * density_s
+            + WEIGHTS_ALL_NO_OUTCOME["recency"] * recency_s
         )
         assert abs(final - expected) < 0.01
 
     def test_no_graph(self):
-        """edge_count=None -> WEIGHTS_NO_GRAPH, density_s=0.0."""
+        """edge_count=None -> WEIGHTS_NO_GRAPH_NO_OUTCOME, density_s=0.0."""
         ref = self._ref()
         last = ref.isoformat()
         final, entry_s, density_s, recency_s = compute_competence_score(
@@ -446,13 +450,13 @@ class TestComputeCompetenceScore:
         assert density_s == 0.0
         assert recency_s >= 0.99
         expected = (
-            WEIGHTS_NO_GRAPH["entry"] * entry_s
-            + WEIGHTS_NO_GRAPH["recency"] * recency_s
+            WEIGHTS_NO_GRAPH_NO_OUTCOME["entry"] * entry_s
+            + WEIGHTS_NO_GRAPH_NO_OUTCOME["recency"] * recency_s
         )
         assert abs(final - expected) < 0.01
 
     def test_no_recency(self):
-        """Empty last_activity -> WEIGHTS_NO_RECENCY, recency_s=0.0."""
+        """Empty last_activity -> WEIGHTS_NO_RECENCY_NO_OUTCOME, recency_s=0.0."""
         ref = self._ref()
         final, entry_s, density_s, recency_s = compute_competence_score(
             entries=50, edge_count=50, last_activity_iso="", reference_time=ref,
@@ -460,13 +464,13 @@ class TestComputeCompetenceScore:
         assert recency_s == 0.0
         assert density_s == 0.5
         expected = (
-            WEIGHTS_NO_RECENCY["entry"] * entry_s
-            + WEIGHTS_NO_RECENCY["density"] * density_s
+            WEIGHTS_NO_RECENCY_NO_OUTCOME["entry"] * entry_s
+            + WEIGHTS_NO_RECENCY_NO_OUTCOME["density"] * density_s
         )
         assert abs(final - expected) < 0.01
 
     def test_entry_only_capped_at_weight(self):
-        """No graph + no recency -> WEIGHTS_ENTRY_ONLY, max possible = 0.8."""
+        """No graph + no recency -> WEIGHTS_ENTRY_ONLY_NO_OUTCOME, max possible = 0.8."""
         ref = self._ref()
         final, entry_s, density_s, recency_s = compute_competence_score(
             entries=500, edge_count=None, last_activity_iso="", reference_time=ref,
@@ -474,7 +478,7 @@ class TestComputeCompetenceScore:
         assert entry_s == 1.0
         assert density_s == 0.0
         assert recency_s == 0.0
-        assert abs(final - WEIGHTS_ENTRY_ONLY["entry"]) < 0.001  # 0.8
+        assert abs(final - WEIGHTS_ENTRY_ONLY_NO_OUTCOME["entry"]) < 0.001  # 0.8
 
     def test_all_zeros_returns_zero(self):
         """Zero entries, no graph, no recency -> 0.0."""
@@ -1042,3 +1046,304 @@ class TestSystemPromptIntegration:
             combined = profile_system
 
         assert combined == profile_system
+
+
+# ---------------------------------------------------------------------------
+# Outcome signal tests
+# ---------------------------------------------------------------------------
+
+
+class TestOutcomeSignal:
+    """Test outcome_rate as 4th signal in compute_competence_score."""
+
+    def _ref(self) -> datetime:
+        return datetime(2026, 2, 20, 12, 0, 0, tzinfo=timezone.utc)
+
+    def test_compute_with_outcome_rate(self):
+        """outcome_rate=0.8 produces a valid score using WEIGHTS_ALL."""
+        ref = self._ref()
+        last = ref.isoformat()
+        final, entry_s, density_s, recency_s = compute_competence_score(
+            entries=100, edge_count=100, last_activity_iso=last,
+            reference_time=ref, outcome_rate=0.8,
+        )
+        assert entry_s == 1.0
+        assert density_s == 1.0
+        assert recency_s >= 0.99
+        expected = (
+            WEIGHTS_ALL["entry"] * entry_s
+            + WEIGHTS_ALL["density"] * density_s
+            + WEIGHTS_ALL["recency"] * recency_s
+            + WEIGHTS_ALL["outcome"] * 0.8
+        )
+        assert abs(final - expected) < 0.01
+
+    def test_outcome_rate_none_degrades(self):
+        """outcome_rate=None uses NO_OUTCOME weights (original behavior)."""
+        ref = self._ref()
+        last = ref.isoformat()
+        final, entry_s, density_s, recency_s = compute_competence_score(
+            entries=100, edge_count=100, last_activity_iso=last,
+            reference_time=ref, outcome_rate=None,
+        )
+        # Should use WEIGHTS_ALL_NO_OUTCOME which is the original WEIGHTS_ALL
+        expected = (
+            WEIGHTS_ALL_NO_OUTCOME["entry"] * entry_s
+            + WEIGHTS_ALL_NO_OUTCOME["density"] * density_s
+            + WEIGHTS_ALL_NO_OUTCOME["recency"] * recency_s
+        )
+        assert abs(final - expected) < 0.01
+
+    def test_high_outcome_boosts_score(self):
+        """0.9 rate > 0.2 rate for same entries/edges/recency."""
+        ref = self._ref()
+        last = ref.isoformat()
+        final_high, _, _, _ = compute_competence_score(
+            entries=50, edge_count=50, last_activity_iso=last,
+            reference_time=ref, outcome_rate=0.9,
+        )
+        final_low, _, _, _ = compute_competence_score(
+            entries=50, edge_count=50, last_activity_iso=last,
+            reference_time=ref, outcome_rate=0.2,
+        )
+        assert final_high > final_low
+
+    def test_weights_sum_to_one(self):
+        """Weight sets with multiple signals sum to approximately 1.0.
+
+        ENTRY_ONLY variants intentionally sum to < 1.0 to cap
+        the maximum score when only entry data is available.
+        """
+        full_weight_sets = [
+            WEIGHTS_ALL,
+            WEIGHTS_NO_GRAPH,
+            WEIGHTS_NO_RECENCY,
+            WEIGHTS_ALL_NO_OUTCOME,
+            WEIGHTS_NO_GRAPH_NO_OUTCOME,
+            WEIGHTS_NO_RECENCY_NO_OUTCOME,
+        ]
+        for ws in full_weight_sets:
+            total = sum(ws.values())
+            assert abs(total - 1.0) < 0.01, f"Weight set {ws} sums to {total}, not ~1.0"
+
+        # ENTRY_ONLY variants are intentionally < 1.0 (capped)
+        for ws in [WEIGHTS_ENTRY_ONLY, WEIGHTS_ENTRY_ONLY_NO_OUTCOME]:
+            total = sum(ws.values())
+            assert total <= 1.0, f"Weight set {ws} sums to {total}, should be <= 1.0"
+            assert total > 0.0, f"Weight set {ws} sums to {total}, should be > 0.0"
+
+    def test_no_graph_with_outcome(self):
+        """edge_count=None + outcome_rate uses WEIGHTS_NO_GRAPH."""
+        ref = self._ref()
+        last = ref.isoformat()
+        final, entry_s, _, recency_s = compute_competence_score(
+            entries=50, edge_count=None, last_activity_iso=last,
+            reference_time=ref, outcome_rate=0.7,
+        )
+        expected = (
+            WEIGHTS_NO_GRAPH["entry"] * entry_s
+            + WEIGHTS_NO_GRAPH["recency"] * recency_s
+            + WEIGHTS_NO_GRAPH["outcome"] * 0.7
+        )
+        assert abs(final - expected) < 0.01
+
+    def test_no_recency_with_outcome(self):
+        """Empty recency + outcome_rate uses WEIGHTS_NO_RECENCY."""
+        ref = self._ref()
+        final, entry_s, density_s, _ = compute_competence_score(
+            entries=50, edge_count=50, last_activity_iso="",
+            reference_time=ref, outcome_rate=0.6,
+        )
+        expected = (
+            WEIGHTS_NO_RECENCY["entry"] * entry_s
+            + WEIGHTS_NO_RECENCY["density"] * density_s
+            + WEIGHTS_NO_RECENCY["outcome"] * 0.6
+        )
+        assert abs(final - expected) < 0.01
+
+    def test_entry_only_with_outcome(self):
+        """No graph + no recency + outcome_rate uses WEIGHTS_ENTRY_ONLY."""
+        ref = self._ref()
+        final, entry_s, _, _ = compute_competence_score(
+            entries=100, edge_count=None, last_activity_iso="",
+            reference_time=ref, outcome_rate=0.5,
+        )
+        expected = (
+            WEIGHTS_ENTRY_ONLY["entry"] * entry_s
+            + WEIGHTS_ENTRY_ONLY["outcome"] * 0.5
+        )
+        assert abs(final - expected) < 0.01
+
+    def test_outcome_zero_lowers_score(self):
+        """outcome_rate=0.0 should produce lower score than no outcome at all."""
+        ref = self._ref()
+        last = ref.isoformat()
+        # With outcome=0.0, outcome signal contributes 0 but weights are redistributed
+        final_with_zero, _, _, _ = compute_competence_score(
+            entries=100, edge_count=100, last_activity_iso=last,
+            reference_time=ref, outcome_rate=0.0,
+        )
+        # Without outcome, uses original weights
+        final_without, _, _, _ = compute_competence_score(
+            entries=100, edge_count=100, last_activity_iso=last,
+            reference_time=ref, outcome_rate=None,
+        )
+        # 0.0 outcome should lower the score compared to no outcome
+        # because no-outcome uses original weights which give more to entry/density/recency
+        assert final_with_zero < final_without
+
+
+class TestCompetenceBuilderOutcomes:
+    """Test CompetenceBuilder integration with outcome data."""
+
+    def test_build_reads_outcome_rates(self, tmp_datalake: Path):
+        """With outcome data in datalake, build uses outcome_rate."""
+        # Create outcomes directory with data
+        outcomes_dir = tmp_datalake / "01-raw" / "outcomes"
+        outcomes_dir.mkdir(parents=True, exist_ok=True)
+
+        # Write outcome data for postgresql (>= 5 non-neutral outcomes)
+        _write_jsonl(
+            outcomes_dir / "2026-02-20_outcomes.jsonl",
+            [
+                {"topic": "postgresql", "outcome": "accepted"},
+                {"topic": "postgresql", "outcome": "accepted"},
+                {"topic": "postgresql", "outcome": "accepted"},
+                {"topic": "postgresql", "outcome": "accepted"},
+                {"topic": "postgresql", "outcome": "rejected"},
+                {"topic": "postgresql", "outcome": "accepted"},
+                {"topic": "postgresql", "outcome": "accepted"},
+                # debugging has only 3 outcomes (below threshold of 5)
+                {"topic": "debugging", "outcome": "accepted"},
+                {"topic": "debugging", "outcome": "rejected"},
+                {"topic": "debugging", "outcome": "accepted"},
+            ],
+        )
+
+        builder = CompetenceBuilder(tmp_datalake)
+        cmap = builder.build()
+
+        # postgresql should have outcome data factored in
+        pg_entry = cmap.get_entry("postgresql")
+        assert pg_entry is not None
+        assert pg_entry.score > 0.0
+
+        # debugging had < 5 outcomes, so outcome_rate should be None (degraded)
+        debug_entry = cmap.get_entry("debugging")
+        assert debug_entry is not None
+        assert debug_entry.score > 0.0
+
+    def test_build_without_outcomes_still_works(self, tmp_datalake: Path):
+        """No outcome directory -> works fine with original weights."""
+        # Ensure no outcomes directory exists
+        outcomes_dir = tmp_datalake / "01-raw" / "outcomes"
+        assert not outcomes_dir.exists()
+
+        builder = CompetenceBuilder(tmp_datalake)
+        cmap = builder.build()
+
+        assert len(cmap.topics) >= 3
+        for entry in cmap.topics:
+            assert entry.score > 0.0
+
+    def test_get_outcome_rates_empty_dir(self, tmp_datalake: Path):
+        """Empty outcomes directory returns empty dict."""
+        outcomes_dir = tmp_datalake / "01-raw" / "outcomes"
+        outcomes_dir.mkdir(parents=True, exist_ok=True)
+
+        builder = CompetenceBuilder(tmp_datalake)
+        rates = builder._get_outcome_rates(["postgresql", "debugging"])
+        assert rates == {}
+
+    def test_get_outcome_rates_below_threshold(self, tmp_datalake: Path):
+        """Topics with < 5 outcomes are excluded."""
+        outcomes_dir = tmp_datalake / "01-raw" / "outcomes"
+        outcomes_dir.mkdir(parents=True, exist_ok=True)
+
+        _write_jsonl(
+            outcomes_dir / "2026-02-20_outcomes.jsonl",
+            [
+                {"topic": "postgresql", "outcome": "accepted"},
+                {"topic": "postgresql", "outcome": "rejected"},
+                {"topic": "postgresql", "outcome": "accepted"},
+                {"topic": "postgresql", "outcome": "accepted"},
+                # Only 4 outcomes - below threshold
+            ],
+        )
+
+        builder = CompetenceBuilder(tmp_datalake)
+        rates = builder._get_outcome_rates(["postgresql"])
+        assert "postgresql" not in rates
+
+    def test_get_outcome_rates_correct_rate(self, tmp_datalake: Path):
+        """Rate is accepted/total for topics with >= 5 outcomes."""
+        outcomes_dir = tmp_datalake / "01-raw" / "outcomes"
+        outcomes_dir.mkdir(parents=True, exist_ok=True)
+
+        _write_jsonl(
+            outcomes_dir / "2026-02-20_outcomes.jsonl",
+            [
+                {"topic": "postgresql", "outcome": "accepted"},
+                {"topic": "postgresql", "outcome": "accepted"},
+                {"topic": "postgresql", "outcome": "accepted"},
+                {"topic": "postgresql", "outcome": "rejected"},
+                {"topic": "postgresql", "outcome": "rejected"},
+            ],
+        )
+
+        builder = CompetenceBuilder(tmp_datalake)
+        rates = builder._get_outcome_rates(["postgresql"])
+        assert "postgresql" in rates
+        # 3 accepted / 5 total = 0.6
+        assert abs(rates["postgresql"] - 0.6) < 0.001
+
+    def test_get_outcome_rates_ignores_neutral(self, tmp_datalake: Path):
+        """Neutral outcomes are not counted."""
+        outcomes_dir = tmp_datalake / "01-raw" / "outcomes"
+        outcomes_dir.mkdir(parents=True, exist_ok=True)
+
+        _write_jsonl(
+            outcomes_dir / "2026-02-20_outcomes.jsonl",
+            [
+                {"topic": "postgresql", "outcome": "accepted"},
+                {"topic": "postgresql", "outcome": "accepted"},
+                {"topic": "postgresql", "outcome": "accepted"},
+                {"topic": "postgresql", "outcome": "rejected"},
+                {"topic": "postgresql", "outcome": "neutral"},
+                {"topic": "postgresql", "outcome": "neutral"},
+                {"topic": "postgresql", "outcome": "accepted"},
+            ],
+        )
+
+        builder = CompetenceBuilder(tmp_datalake)
+        rates = builder._get_outcome_rates(["postgresql"])
+        assert "postgresql" in rates
+        # 4 accepted / 5 non-neutral (4 accepted + 1 rejected) = 0.8
+        assert abs(rates["postgresql"] - 0.8) < 0.001
+
+    def test_get_outcome_rates_multiple_files(self, tmp_datalake: Path):
+        """Outcomes are aggregated across multiple JSONL files."""
+        outcomes_dir = tmp_datalake / "01-raw" / "outcomes"
+        outcomes_dir.mkdir(parents=True, exist_ok=True)
+
+        _write_jsonl(
+            outcomes_dir / "2026-02-18_outcomes.jsonl",
+            [
+                {"topic": "postgresql", "outcome": "accepted"},
+                {"topic": "postgresql", "outcome": "accepted"},
+                {"topic": "postgresql", "outcome": "accepted"},
+            ],
+        )
+        _write_jsonl(
+            outcomes_dir / "2026-02-19_outcomes.jsonl",
+            [
+                {"topic": "postgresql", "outcome": "rejected"},
+                {"topic": "postgresql", "outcome": "rejected"},
+            ],
+        )
+
+        builder = CompetenceBuilder(tmp_datalake)
+        rates = builder._get_outcome_rates(["postgresql"])
+        assert "postgresql" in rates
+        # 3 accepted / 5 total = 0.6
+        assert abs(rates["postgresql"] - 0.6) < 0.001

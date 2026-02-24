@@ -7,7 +7,9 @@ task type and user competence level.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import structlog
@@ -313,6 +315,22 @@ class TaskRouter:
         self.profile = profile
         self.default_model: str = getattr(settings, "default_model", "")
         self.fallback_model: str = getattr(settings, "fallback_model", "")
+        self._strategy_overrides: dict = self._load_overrides(settings)
+
+    @staticmethod
+    def _load_overrides(settings: Any) -> dict:
+        """Load strategy overrides from data/profile/strategy_overrides.json."""
+        data_dir = getattr(settings, "data_dir", None)
+        if data_dir is None:
+            return {}
+        override_path = Path(data_dir) / "profile" / "strategy_overrides.json"
+        if not override_path.exists():
+            return {}
+        try:
+            with open(override_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            return {}
 
     async def route(self, query: str) -> RoutingDecision:
         """Classify query and produce a full routing decision."""
@@ -337,6 +355,19 @@ class TaskRouter:
 
         # 5. Get retrieval strategy
         strategy = get_strategy(task_type)
+
+        # Apply strategy override if available
+        override_key = f"{task_type}_{topic}" if topic else task_type
+        override = self._strategy_overrides.get(override_key)
+        if override:
+            strategy = RetrievalStrategy(
+                use_rag=strategy.use_rag,
+                use_graph=strategy.use_graph,
+                graph_depth=override.get("graph_depth", strategy.graph_depth),
+                vector_weight=override.get("vector_weight", strategy.vector_weight),
+                graph_weight=override.get("graph_weight", strategy.graph_weight),
+                fulltext_weight=override.get("fulltext_weight", strategy.fulltext_weight),
+            )
 
         # 6. Build adapted system prompt
         system_prompt = build_system_prompt(

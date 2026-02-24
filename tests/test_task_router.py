@@ -1,6 +1,7 @@
-"""Tests for the Adaptive Task Router."""
+"""Tests for the Adaptive Task Router ."""
 
 import asyncio
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.core.competence_model import CompetenceEntry, CompetenceMap
@@ -478,3 +479,153 @@ class TestCLIIntegrationSmoke:
         router = TaskRouter(cmap, profile, settings)
         assert router.default_model == settings.default_model
         assert router.fallback_model == settings.fallback_model
+
+
+# ---------------------------------------------------------------------------
+# Task 8: Strategy overrides # ---------------------------------------------------------------------------
+
+
+class TestStrategyOverrides:
+    """Verify TaskRouter loads and applies strategy overrides from JSON."""
+
+    def _make_router_with_overrides(self, tmp_path, overrides):
+        """Build a TaskRouter with strategy overrides written to tmp_path."""
+        profile_dir = tmp_path / "profile"
+        profile_dir.mkdir(parents=True, exist_ok=True)
+        override_file = profile_dir / "strategy_overrides.json"
+        with open(override_file, "w", encoding="utf-8") as f:
+            json.dump(overrides, f)
+
+        profile = PersonalProfile(
+            domain="software_development",
+            domain_confidence=0.95,
+            patterns=["Use Python with FastAPI"],
+        )
+        cmap = CompetenceMap(topics=[
+            CompetenceEntry(topic="postgresql", score=0.85, level="Expert"),
+            CompetenceEntry(topic="kubernetes", score=0.05, level="Unknown"),
+        ])
+        mock_settings = MagicMock()
+        mock_settings.default_model = "qwen2.5-coder:14b"
+        mock_settings.fallback_model = "qwen2.5-coder:32b"
+        mock_settings.data_dir = str(tmp_path)
+        return TaskRouter(cmap, profile, mock_settings)
+
+    def test_override_applied_to_matching_combo(self, tmp_path):
+        """Override for debugging_postgresql changes strategy values."""
+        overrides = {
+            "debugging_postgresql": {
+                "graph_depth": 5,
+                "vector_weight": 0.3,
+                "graph_weight": 0.7,
+            },
+        }
+        router = self._make_router_with_overrides(tmp_path, overrides)
+        decision = asyncio.run(router.route("fix the error in postgresql"))
+        assert decision.task_type == "debugging"
+        assert decision.topic == "postgresql"
+        assert decision.strategy.graph_depth == 5
+        assert decision.strategy.vector_weight == 0.3
+        assert decision.strategy.graph_weight == 0.7
+
+    def test_no_override_uses_default(self, tmp_path):
+        """Override for debugging_postgresql, but query is about docker -> default."""
+        overrides = {
+            "debugging_postgresql": {
+                "graph_depth": 5,
+                "vector_weight": 0.3,
+                "graph_weight": 0.7,
+            },
+        }
+        router = self._make_router_with_overrides(tmp_path, overrides)
+        # "explain" maps to explanation, not debugging, and no topic override
+        decision = asyncio.run(router.route("explain how kubernetes works"))
+        # Default explanation strategy: graph_depth=2, vector_weight=0.6, graph_weight=0.4
+        assert decision.strategy.graph_depth == 2
+        assert decision.strategy.vector_weight == 0.6
+        assert decision.strategy.graph_weight == 0.4
+
+    def test_no_overrides_file_works(self, tmp_path):
+        """No strategy_overrides.json at all -> router works with defaults."""
+        profile = PersonalProfile(
+            domain="software_development",
+            domain_confidence=0.95,
+        )
+        cmap = CompetenceMap(topics=[
+            CompetenceEntry(topic="postgresql", score=0.85, level="Expert"),
+        ])
+        mock_settings = MagicMock()
+        mock_settings.default_model = "qwen2.5-coder:14b"
+        mock_settings.fallback_model = "qwen2.5-coder:32b"
+        mock_settings.data_dir = str(tmp_path)
+        router = TaskRouter(cmap, profile, mock_settings)
+        decision = asyncio.run(router.route("fix error in postgresql"))
+        # Default debugging strategy
+        assert decision.strategy.graph_depth == 2
+        assert decision.strategy.vector_weight == 0.5
+        assert decision.strategy.graph_weight == 0.5
+
+    def test_override_with_fulltext_weight(self, tmp_path):
+        """Override can include fulltext_weight."""
+        overrides = {
+            "debugging_postgresql": {
+                "graph_depth": 3,
+                "vector_weight": 0.4,
+                "graph_weight": 0.4,
+                "fulltext_weight": 0.2,
+            },
+        }
+        router = self._make_router_with_overrides(tmp_path, overrides)
+        decision = asyncio.run(router.route("fix the error in postgresql"))
+        assert decision.strategy.fulltext_weight == 0.2
+
+    def test_override_task_only_key(self, tmp_path):
+        """Override keyed by task_type only (no topic) when topic is None."""
+        overrides = {
+            "debugging": {
+                "graph_depth": 4,
+                "vector_weight": 0.2,
+                "graph_weight": 0.8,
+            },
+        }
+        router = self._make_router_with_overrides(tmp_path, overrides)
+        # "fix this random error" has no topic match
+        decision = asyncio.run(router.route("fix this random error"))
+        assert decision.topic is None
+        assert decision.strategy.graph_depth == 4
+        assert decision.strategy.vector_weight == 0.2
+        assert decision.strategy.graph_weight == 0.8
+
+    def test_data_dir_none_returns_empty_overrides(self):
+        """When settings.data_dir is None, overrides should be empty."""
+        mock_settings = MagicMock()
+        mock_settings.data_dir = None
+        overrides = TaskRouter._load_overrides(mock_settings)
+        assert overrides == {}
+
+    def test_malformed_json_returns_empty_overrides(self, tmp_path):
+        """Malformed JSON file -> empty overrides, no crash."""
+        profile_dir = tmp_path / "profile"
+        profile_dir.mkdir(parents=True, exist_ok=True)
+        override_file = profile_dir / "strategy_overrides.json"
+        override_file.write_text("{invalid json", encoding="utf-8")
+
+        mock_settings = MagicMock()
+        mock_settings.data_dir = str(tmp_path)
+        overrides = TaskRouter._load_overrides(mock_settings)
+        assert overrides == {}
+
+    def test_partial_override_preserves_defaults(self, tmp_path):
+        """Override with only graph_depth keeps other values from default strategy."""
+        overrides = {
+            "debugging_postgresql": {
+                "graph_depth": 10,
+            },
+        }
+        router = self._make_router_with_overrides(tmp_path, overrides)
+        decision = asyncio.run(router.route("fix the error in postgresql"))
+        assert decision.strategy.graph_depth == 10
+        # Default debugging strategy values preserved
+        assert decision.strategy.vector_weight == 0.5
+        assert decision.strategy.graph_weight == 0.5
+        assert decision.strategy.fulltext_weight == 0.0
