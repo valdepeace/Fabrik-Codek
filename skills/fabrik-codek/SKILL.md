@@ -1,7 +1,7 @@
 ---
 name: fabrik-codek
-description: "Cognitive architecture for developers: hyper-personalization engine (personal profiling, competence model, adaptive task routing, outcome tracking) over three-tier hybrid retrieval (vector + knowledge graph + full-text). A 7B model that knows you is worth more than a 400B that doesn't. 100% local, zero cloud dependencies."
-version: 1.6.0
+description: "Personal cognitive architecture that learns how you work. Builds a knowledge graph from your sessions, profiles your expertise, adapts retrieval per task, and self-corrects via outcome feedback. Three-tier hybrid RAG (vector + graph + full-text). 100% local with any Ollama model."
+version: 1.7.0
 homepage: https://github.com/ikchain/Fabrik-Codek
 user-invocable: true
 metadata:
@@ -16,21 +16,34 @@ metadata:
       - "~/.claude/projects/*"
       - "./data/embeddings/"
       - "./data/graphdb/"
+      - "./data/profile/"
     install:
       - kind: pip
         package: fabrik-codek
         bins: [fabrik]
 ---
 
-# Fabrik-Codek - Local Cognitive Architecture for Developers
+# Fabrik-Codek
 
-Fabrik-Codek is a **cognitive architecture** — a system where perception, memory, reasoning, learning, and action work together, much like how a human developer accumulates expertise over time. Unlike plain RAG tools that just retrieve text, Fabrik-Codek combines three retrieval tiers — vector search (semantic), knowledge graph traversal (relational), and full-text search (keyword/BM25) — fused via Reciprocal Rank Fusion (RRF). It continuously improves through a data flywheel that captures what you do and feeds it back into every future query.
+> A 7B model that knows you is worth more than a 400B that doesn't.
 
-**How it works**: When you run `fabrik learn process`, Fabrik-Codek reads your local Claude Code session transcript files (`~/.claude/projects/*/` — JSON files already on your disk) and extracts structured knowledge (patterns, decisions, debugging strategies). It stores this in a local vector DB (LanceDB, in `./data/embeddings/`) and a local knowledge graph (NetworkX, in `./data/graphdb/`). When you query via MCP tools, it uses hybrid retrieval to give your AI agent deep project context — not just keyword matches, but an understanding of how concepts in your codebase connect. No data leaves your machine at any point.
+Fabrik-Codek is a **personal cognitive architecture** that runs locally with any Ollama model. It doesn't just retrieve documents — it builds a knowledge graph from how you work, measures your expertise per topic, routes tasks to the right model with the right retrieval strategy, observes whether its responses actually helped, and refines itself over time.
+
+## How It Works
+
+1. **You work** — Fabrik-Codek captures code changes, session transcripts, decisions, and learnings in a local datalake
+2. **Knowledge extraction** — An 11-step pipeline extracts entities and relationships into a knowledge graph alongside a vector DB
+3. **Personal profiling** — Analyzes your datalake to learn your domain, stack, patterns, and tooling preferences
+4. **Competence scoring** — Measures how deep your knowledge is per topic (Expert / Competent / Novice / Unknown)
+5. **Adaptive routing** — Classifies each query by task type and topic, selects the right model, adapts retrieval depth, and builds a 3-layer system prompt
+6. **Outcome tracking** — Infers whether responses were useful from conversational patterns (zero friction, no manual feedback)
+7. **Self-correction** — Adjusts retrieval parameters for underperforming task/topic combinations
+
+Every interaction feeds back into the system. No data leaves your machine at any point.
 
 ## Setup
 
-Fabrik-Codek runs as an MCP server. Configure it in your `openclaw.json`:
+Configure as an MCP server in your `openclaw.json` or `~/.claude/settings.json`:
 
 ```json
 {
@@ -43,7 +56,7 @@ Fabrik-Codek runs as an MCP server. Configure it in your `openclaw.json`:
 }
 ```
 
-Or for network access (SSE transport):
+For network access (SSE transport):
 
 ```json
 {
@@ -56,57 +69,110 @@ Or for network access (SSE transport):
 }
 ```
 
-## Available Tools
+### First Run
 
-### fabrik_search
-Semantic vector search in the knowledge base. Use this when you need to find relevant documents, patterns, or examples from accumulated project knowledge.
+After installing, initialize and build the knowledge base:
 
-Example: "Search my knowledge base for repository pattern implementations"
+```bash
+fabrik init                              # Set up config, download models
+fabrik graph build --include-transcripts  # Build knowledge graph from sessions
+fabrik rag index                         # Index datalake into vector DB
+fabrik profile build                     # Build your personal profile
+fabrik competence build                  # Build competence map
+```
 
-### fabrik_graph_search
-Search the knowledge graph for entities (technologies, patterns, strategies) and their relationships. Use this to understand how concepts connect.
-
-Example: "Find entities related to FastAPI in the knowledge graph"
-
-### fabrik_fulltext_search
-Full-text keyword search via Meilisearch. Use this for exact keyword or phrase matching when you know the specific terms you're looking for. Requires Meilisearch running locally (optional — system works without it).
-
-Example: "Search for 'retry exponential backoff' in the knowledge base"
+## Available MCP Tools
 
 ### fabrik_ask
-Ask a coding question to the local LLM with optional context from the knowledge base. Set `use_rag=true` for vector search context or `use_graph=true` for hybrid (vector + graph + fulltext) context.
 
-Example: "Ask fabrik how to implement dependency injection using knowledge base context"
+Ask a question to the local LLM with optional context from the knowledge base. The Task Router automatically classifies your query, selects the right model based on your competence, adapts retrieval strategy, and builds a personalized system prompt.
+
+- `use_rag=true` — vector search context
+- `use_graph=true` — hybrid context (vector + graph + full-text)
+
+Example: *"How should I handle database connection pooling?"*
+
+### fabrik_search
+
+Semantic vector search across your accumulated knowledge. Returns the most relevant documents, patterns, and examples by meaning — not just keywords.
+
+Example: *"Find examples of retry logic with exponential backoff"*
+
+### fabrik_graph_search
+
+Traverse the knowledge graph to find entities (technologies, patterns, strategies) and their relationships. Useful for understanding how concepts connect in your experience.
+
+- `depth` — how many hops to traverse (default: 2)
+
+Example: *"What technologies are related to FastAPI in my knowledge graph?"*
+
+### fabrik_fulltext_search
+
+Full-text keyword search via Meilisearch. Use this for exact keyword or phrase matching when you know the specific terms. Optional — the system works without Meilisearch installed.
+
+Example: *"Search for 'EXPLAIN ANALYZE' in my knowledge base"*
 
 ### fabrik_graph_stats
-Get statistics about the knowledge graph: entity counts, relationship types, and graph density.
+
+Knowledge graph statistics: entity count, edge count, connected components, type breakdown, and relation types.
 
 ### fabrik_status
-Check system health: Ollama availability, RAG engine, knowledge graph, full-text search, and datalake status.
 
-### fabrik_profile
-Build or view your personal profile. The profile analyzes your datalake and generates behavioral system prompt instructions so the LLM responds using your actual stack and preferences.
+System health check: Ollama availability, RAG engine, knowledge graph, full-text search, and datalake status.
 
-Example: "Build my profile" or "Show my profile"
+## Available MCP Resources
 
-## When to Use
+| URI | Description |
+|-----|-------------|
+| `fabrik://status` | System component status |
+| `fabrik://graph/stats` | Knowledge graph statistics |
+| `fabrik://config` | Current configuration (sanitized) |
 
-- **Need project context?** Use `fabrik_search` for semantic similarity or `fabrik_fulltext_search` for exact keyword matching
-- **Exploring relationships?** Use `fabrik_graph_search` to traverse the knowledge graph
-- **Coding question?** Use `fabrik_ask` with `use_rag` or `use_graph` for context-enriched answers
-- **Checking setup?** Use `fabrik_status` to verify all components are running
+## When to Use Each Tool
+
+| Scenario | Tool | Why |
+|----------|------|-----|
+| Coding question needing context | `fabrik_ask` with `use_graph=true` | Gets hybrid retrieval + personalized prompt |
+| Find similar patterns or examples | `fabrik_search` | Semantic similarity across all knowledge |
+| Understand how concepts relate | `fabrik_graph_search` | Graph traversal shows entity relationships |
+| Find exact terms or phrases | `fabrik_fulltext_search` | BM25 keyword matching |
+| Check if knowledge base is healthy | `fabrik_status` | Component health check |
+| Understand knowledge distribution | `fabrik_graph_stats` | Entity/edge counts and types |
+
+## The Cognitive Loop
+
+The system gets smarter the more you use it:
+
+```
+You work → Flywheel captures it → Pipeline extracts knowledge
+    ↑                                        ↓
+Strategy Optimizer ← Outcome Tracker ← LLM responds with context
+    ↓                                        ↑
+    └──── adjusts retrieval ──→ Task Router ─┘
+                                    ↓
+                  Profile + Competence + task-specific prompt
+```
+
+- **Personal Profile** learns your domain, stack, and preferences from your datalake
+- **Competence Model** scores expertise per topic using 4 signals (entry count, graph density, recency, outcome rate)
+- **Task Router** classifies queries into 7 task types, detects topic, selects model, adapts retrieval
+- **Outcome Tracker** infers response quality from conversational patterns (topic change = accepted, reformulation = rejected)
+- **Strategy Optimizer** adjusts retrieval parameters for weak spots
+- **Graph Temporal Decay** fades stale knowledge, reinforces recent activity
+- **Semantic Drift Detection** alerts when an entity's context shifts between graph builds
 
 ## Requirements
 
 - [Fabrik-Codek](https://github.com/ikchain/Fabrik-Codek) installed (`pip install fabrik-codek`)
-- [Ollama](https://ollama.ai/) running locally with a model pulled (e.g., `ollama pull qwen2.5-coder:7b`)
+- [Ollama](https://ollama.ai/) running locally with any model (e.g., `ollama pull qwen2.5-coder:7b`)
+- Optional: [Meilisearch](https://meilisearch.com/) for full-text search (system works without it)
 
 ## Security & Privacy
 
-- **100% local**: All data stays on your machine. No external API calls, no telemetry, no cloud dependencies.
-- **No credentials required**: Fabrik-Codek connects only to your local Ollama instance (`localhost:11434`).
-- **External endpoints**: None. This skill does not contact any external services.
-- **Data paths**: Reads transcript files from `~/.claude/projects/*/` (local JSON already on disk). Writes indexed data to `./data/embeddings/` (vector DB) and `./data/graphdb/` (knowledge graph). Both paths are declared in the skill metadata.
-- **Session reading**: The `fabrik learn` command is opt-in — triggered manually by the user, not automatic background surveillance. Transcripts may contain sensitive session data; review before indexing.
-- **Network exposure**: Default transport is `stdio` (no network). SSE transport (`--transport sse`) binds to `127.0.0.1` by default. If you change the bind address, ensure proper firewall/ACL rules to avoid exposing indexed data over the network.
-- **Install source**: Fully open source at [github.com/ikchain/Fabrik-Codek](https://github.com/ikchain/Fabrik-Codek) (MIT license). Verify the pip package source matches the GitHub repository before installing.
+- **100% local**: All data stays on your machine. No external API calls, no telemetry, no cloud dependencies
+- **No credentials required**: Connects only to your local Ollama instance (`localhost:11434`)
+- **No external endpoints**: This skill does not contact any external services
+- **Data paths**: Reads transcript files from `~/.claude/projects/*/` (local JSON already on disk). Writes to `./data/embeddings/` (vector DB), `./data/graphdb/` (knowledge graph), and `./data/profile/` (personal profile). All paths are declared in the skill metadata
+- **Session reading**: `fabrik learn` is opt-in — triggered manually by the user, not automatic background surveillance. Transcripts may contain sensitive data; review before indexing
+- **Network exposure**: Default transport is `stdio` (no network). SSE transport binds to `127.0.0.1` by default. If you change the bind address, ensure proper firewall/ACL rules
+- **Open source**: Fully auditable at [github.com/ikchain/Fabrik-Codek](https://github.com/ikchain/Fabrik-Codek) (MIT license)
