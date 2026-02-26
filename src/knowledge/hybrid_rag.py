@@ -8,9 +8,7 @@ import re
 
 import structlog
 
-from src.config import settings
 from src.knowledge.graph_engine import GraphEngine
-from src.knowledge.graph_schema import EntityType
 from src.knowledge.rag import RAGEngine
 
 logger = structlog.get_logger()
@@ -86,7 +84,10 @@ class HybridRAGEngine:
 
         # 2. Graph-enhanced retrieval
         graph_results = await self._graph_retrieve(
-            query, limit=limit * 2, depth=graph_depth, min_weight=min_weight,
+            query,
+            limit=limit * 2,
+            depth=graph_depth,
+            min_weight=min_weight,
         )
 
         # 3. Full-text search (when available and weighted)
@@ -134,7 +135,9 @@ class HybridRAGEngine:
         all_doc_ids: set[str] = set()
         for eid in entity_ids:
             doc_ids = self._graph.get_source_docs_from_neighbors(
-                eid, depth=depth, min_weight=min_weight,
+                eid,
+                depth=depth,
+                min_weight=min_weight,
             )
             all_doc_ids.update(doc_ids)
 
@@ -153,7 +156,9 @@ class HybridRAGEngine:
                 continue
 
             # Search vector DB using entity name
-            entity_results = await self._rag.retrieve(entity.name, limit=limit // len(entity_ids) + 1)
+            entity_results = await self._rag.retrieve(
+                entity.name, limit=limit // len(entity_ids) + 1
+            )
             for r in entity_results:
                 text_key = r["text"][:100]
                 if text_key not in seen_texts:
@@ -169,7 +174,7 @@ class HybridRAGEngine:
         query_lower = query.lower()
 
         # Extract individual words and bigrams
-        single_words = re.findall(r'\b\w+\b', query_lower)
+        single_words = re.findall(r"\b\w+\b", query_lower)
         bigrams = [f"{single_words[i]} {single_words[i+1]}" for i in range(len(single_words) - 1)]
         candidates = bigrams + single_words  # Bigrams first for longer matches
 
@@ -272,14 +277,16 @@ class HybridRAGEngine:
         # Add graph relationship paths if available
         graph_paths = results[0].get("graph_context", []) if results else []
         if graph_paths:
-            context_parts.append("\nKnown relations:\n" + "\n".join(f"- {p}" for p in graph_paths))
+            context_parts.append(
+                "\nRelaciones conocidas:\n" + "\n".join(f"- {p}" for p in graph_paths)
+            )
 
         context = "\n---\n".join(context_parts)
 
-        return f"""Context from your knowledge base (vector + graph):
+        return f"""Contexto de tu base de conocimiento (vector + grafo):
 {context}
 
 ---
-Question: {query}
+Pregunta: {query}
 
-Answer using the context when relevant."""
+Responde usando el contexto cuando sea relevante."""

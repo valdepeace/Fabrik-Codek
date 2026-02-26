@@ -155,13 +155,15 @@ class FullTextEngine:
             data = resp.json()
             results = []
             for rank, hit in enumerate(data.get("hits", [])):
-                results.append({
-                    "text": hit.get("text", ""),
-                    "source": hit.get("source", ""),
-                    "category": hit.get("category", ""),
-                    "score": 1.0 / (1.0 + rank),
-                    "origin": "fulltext",
-                })
+                results.append(
+                    {
+                        "text": hit.get("text", ""),
+                        "source": hit.get("source", ""),
+                        "category": hit.get("category", ""),
+                        "score": 1.0 / (1.0 + rank),
+                        "origin": "fulltext",
+                    }
+                )
             return results
 
         except (httpx.ConnectError, httpx.TimeoutException) as exc:

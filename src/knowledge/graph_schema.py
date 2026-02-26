@@ -7,6 +7,7 @@ from enum import Enum
 
 class EntityType(str, Enum):
     """Types of entities in the knowledge graph."""
+
     CONCEPT = "concept"
     TECHNOLOGY = "technology"
     PATTERN = "pattern"
@@ -17,6 +18,7 @@ class EntityType(str, Enum):
 
 class RelationType(str, Enum):
     """Types of relationships between entities."""
+
     USES = "uses"
     RELATED_TO = "related_to"
     FIXES = "fixes"
@@ -35,6 +37,7 @@ def make_entity_id(entity_type: str, name: str) -> str:
 @dataclass
 class Entity:
     """A node in the knowledge graph."""
+
     id: str
     name: str
     entity_type: EntityType
@@ -73,6 +76,7 @@ class Entity:
 @dataclass
 class Relation:
     """An edge in the knowledge graph."""
+
     source_id: str
     target_id: str
     relation_type: RelationType
@@ -105,6 +109,7 @@ class Relation:
 @dataclass
 class Triple:
     """An extracted triple (subject, predicate, object) before resolution."""
+
     subject_name: str
     subject_type: EntityType
     relation_type: RelationType

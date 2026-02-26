@@ -16,63 +16,115 @@ import structlog
 logger = structlog.get_logger()
 
 CODE_EXTENSIONS = {
-    ".py", ".ts", ".tsx", ".js", ".jsx", ".java",
-    ".go", ".rs", ".rb", ".cs", ".cpp", ".c", ".h",
-    ".vue", ".svelte", ".kt", ".swift", ".sh", ".sql",
+    ".py",
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".java",
+    ".go",
+    ".rs",
+    ".rb",
+    ".cs",
+    ".cpp",
+    ".c",
+    ".h",
+    ".vue",
+    ".svelte",
+    ".kt",
+    ".swift",
+    ".sh",
+    ".sql",
 }
 
 # Maps file extensions to human-readable language names for pattern generation.
 _EXT_TO_LANGUAGE: dict[str, str] = {
-    ".py": "Python", ".ts": "TypeScript", ".tsx": "TypeScript",
-    ".js": "JavaScript", ".jsx": "JavaScript", ".java": "Java",
-    ".go": "Go", ".rs": "Rust", ".rb": "Ruby", ".cs": "C#",
-    ".cpp": "C++", ".c": "C", ".kt": "Kotlin", ".swift": "Swift",
+    ".py": "Python",
+    ".ts": "TypeScript",
+    ".tsx": "TypeScript",
+    ".js": "JavaScript",
+    ".jsx": "JavaScript",
+    ".java": "Java",
+    ".go": "Go",
+    ".rs": "Rust",
+    ".rb": "Ruby",
+    ".cs": "C#",
+    ".cpp": "C++",
+    ".c": "C",
+    ".kt": "Kotlin",
+    ".swift": "Swift",
 }
 
 # Categories that indicate *what* the user does, not *what* they know.
 # Filtered from topic weights (noise) but used for task type detection.
 META_CATEGORIES = {
-    "general", "error_fix", "explanation", "code_generation",
-    "refactor", "decision",
+    "general",
+    "error_fix",
+    "explanation",
+    "code_generation",
+    "refactor",
+    "decision",
 }
 
 # Task type consolidation: many datalake subcategories → canonical types.
 # Value None means the category is filtered out entirely.
 TASK_TYPE_CONSOLIDATION: dict[str, str | None] = {
     # Debugging
-    "debugging": "debugging", "debugging-real": "debugging",
+    "debugging": "debugging",
+    "debugging-real": "debugging",
     "error_fix": "debugging",
     # Code review
-    "code_review": "code_review", "code-review": "code_review",
+    "code_review": "code_review",
+    "code-review": "code_review",
     # Architecture
-    "ddd": "architecture", "hexagonal": "architecture",
+    "ddd": "architecture",
+    "hexagonal": "architecture",
     "clean-architecture": "architecture",
-    "architecture-decisions": "architecture", "api-design": "architecture",
+    "architecture-decisions": "architecture",
+    "api-design": "architecture",
     # ML / AI
-    "ml": "ml_engineering", "ml-finetuning": "ml_engineering",
-    "ml-rag": "ml_engineering", "ml-embeddings": "ml_engineering",
-    "ml-agents": "ml_engineering", "ml-prompting": "ml_engineering",
-    "ml-quantization": "ml_engineering", "ml-deployment": "ml_engineering",
-    "ml-vectordb": "ml_engineering", "ml-evaluation": "ml_engineering",
-    "agents": "ml_engineering", "langgraph": "ml_engineering",
+    "ml": "ml_engineering",
+    "ml-finetuning": "ml_engineering",
+    "ml-rag": "ml_engineering",
+    "ml-embeddings": "ml_engineering",
+    "ml-agents": "ml_engineering",
+    "ml-prompting": "ml_engineering",
+    "ml-quantization": "ml_engineering",
+    "ml-deployment": "ml_engineering",
+    "ml-vectordb": "ml_engineering",
+    "ml-evaluation": "ml_engineering",
+    "agents": "ml_engineering",
+    "langgraph": "ml_engineering",
     # DevOps / Infra
-    "docker": "devops", "kubernetes": "devops", "terraform": "devops",
-    "cicd": "devops", "nginx": "devops", "git": "devops",
+    "docker": "devops",
+    "kubernetes": "devops",
+    "terraform": "devops",
+    "cicd": "devops",
+    "nginx": "devops",
+    "git": "devops",
     # Frontend
-    "angular": "frontend", "react": "frontend", "nextjs": "frontend",
+    "angular": "frontend",
+    "react": "frontend",
+    "nextjs": "frontend",
     "typescript": "frontend",
     # Backend
-    "postgresql": "backend", "fastapi": "backend", "python": "backend",
+    "postgresql": "backend",
+    "fastapi": "backend",
+    "python": "backend",
     # Security
-    "security": "security", "keycloak": "security",
+    "security": "security",
+    "oauth": "security",
     # Testing
     "testing": "testing",
     # Refactoring (all sub-variants)
     "refactoring": "refactoring",
     # Generation / Explanation
-    "code_generation": "generation", "explanation": "generation",
+    "code_generation": "generation",
+    "explanation": "generation",
     # Noise — filtered
-    "general": None, "decision": None, "refactor": None,
+    "general": None,
+    "decision": None,
+    "refactor": None,
 }
 
 
@@ -155,9 +207,7 @@ class PersonalProfile:
         return cls(
             domain=data.get("domain", "unknown"),
             domain_confidence=data.get("domain_confidence", 0.0),
-            top_topics=[
-                TopicWeight.from_dict(t) for t in data.get("top_topics", [])
-            ],
+            top_topics=[TopicWeight.from_dict(t) for t in data.get("top_topics", [])],
             style=StyleProfile.from_dict(data.get("style", {})),
             patterns=data.get("patterns", []),
             task_types_detected=data.get("task_types_detected", []),
@@ -175,8 +225,7 @@ class PersonalProfile:
         """
         if self.domain == "unknown" or self.domain_confidence < 0.1:
             return (
-                "You are a general-purpose assistant. "
-                "Adapt your responses to the user's needs."
+                "You are a general-purpose assistant. " "Adapt your responses to the user's needs."
             )
 
         domain_label = self.domain.replace("_", " ")
@@ -404,9 +453,7 @@ class ProfileBuilder:
     Domain-agnostic: software development is one heuristic among many.
     """
 
-    def __init__(
-        self, datalake_path: Path, graph_stats: dict | None = None
-    ) -> None:
+    def __init__(self, datalake_path: Path, graph_stats: dict | None = None) -> None:
         self.datalake_path = Path(datalake_path)
         self.graph_stats = graph_stats or {}
 
@@ -464,9 +511,7 @@ class ProfileBuilder:
         )
         return profile
 
-    def _detect_domain(
-        self, tp_data: dict, ac_data: dict
-    ) -> tuple[str, float]:
+    def _detect_domain(self, tp_data: dict, ac_data: dict) -> tuple[str, float]:
         """Detect the user's primary domain from datalake signals.
 
         PRIMARY signal: file extensions from auto-captures (unambiguous).
@@ -484,15 +529,13 @@ class ProfileBuilder:
 
         # PRIMARY: file extensions — most unambiguous signal
         code_ext_count = sum(
-            count for ext, count in file_extensions.items()
-            if ext in CODE_EXTENSIONS
+            count for ext, count in file_extensions.items() if ext in CODE_EXTENSIONS
         )
         ext_ratio = code_ext_count / total_ext_count if total_ext_count else 0.0
 
         # SECONDARY: categories that map through consolidation are code-related
         code_cat_count = sum(
-            count for cat, count in categories.items()
-            if cat in TASK_TYPE_CONSOLIDATION
+            count for cat, count in categories.items() if cat in TASK_TYPE_CONSOLIDATION
         )
         cat_ratio = code_cat_count / total_cat_count if total_cat_count else 0.0
 
@@ -518,9 +561,7 @@ class ProfileBuilder:
 
         return ("unknown", 0.0)
 
-    def _compute_topic_weights(
-        self, categories: Counter
-    ) -> list[TopicWeight]:
+    def _compute_topic_weights(self, categories: Counter) -> list[TopicWeight]:
         """Normalize category counts into TopicWeight list summing to ~1.0.
 
         Filters out META_CATEGORIES (noise like "general", "error_fix")
@@ -532,20 +573,16 @@ class ProfileBuilder:
 
         # Filter meta-categories — they describe *what* the user does,
         # not *what* they know about.
-        filtered = Counter({
-            cat: count for cat, count in categories.items()
-            if cat not in META_CATEGORIES
-        })
+        filtered = Counter(
+            {cat: count for cat, count in categories.items() if cat not in META_CATEGORIES}
+        )
 
         total = sum(filtered.values())
         if total == 0:
             return []
 
         top_items = filtered.most_common(10)
-        weights = [
-            TopicWeight(topic=cat, weight=count / total)
-            for cat, count in top_items
-        ]
+        weights = [TopicWeight(topic=cat, weight=count / total) for cat, count in top_items]
         return weights
 
     def _detect_task_types(self, categories: Counter) -> list[str]:
@@ -583,17 +620,12 @@ class ProfileBuilder:
 
         # Formal categories hint at higher formality
         formal_cats = {"ddd", "terraform", "kubernetes", "civil_law", "labor_law"}
-        formal_count = sum(
-            count for cat, count in categories.items()
-            if cat in formal_cats
-        )
+        formal_count = sum(count for cat, count in categories.items() if cat in formal_cats)
         formality = min(0.4 + (formal_count / total_pairs) * 0.6, 1.0)
 
         return StyleProfile(formality=formality, verbosity=0.5, language="en")
 
-    def _detect_patterns(
-        self, ac_data: dict, tp_data: dict, domain: str = "unknown"
-    ) -> list[str]:
+    def _detect_patterns(self, ac_data: dict, tp_data: dict, domain: str = "unknown") -> list[str]:
         """Extract actionable preferences from datalake signals.
 
         For software_development, generates behavioral instructions
@@ -610,19 +642,12 @@ class ProfileBuilder:
         # Non-code domain: generic patterns from top categories
         patterns: list[str] = []
         if categories:
-            real_cats = [
-                cat for cat, _ in categories.most_common(5)
-                if cat not in META_CATEGORIES
-            ]
+            real_cats = [cat for cat, _ in categories.most_common(5) if cat not in META_CATEGORIES]
             if real_cats:
-                patterns.append(
-                    f"Key areas: {', '.join(real_cats[:3])}"
-                )
+                patterns.append(f"Key areas: {', '.join(real_cats[:3])}")
         return patterns
 
-    def _detect_code_patterns(
-        self, categories: Counter, file_extensions: Counter
-    ) -> list[str]:
+    def _detect_code_patterns(self, categories: Counter, file_extensions: Counter) -> list[str]:
         """Generate actionable coding preferences from datalake signals.
 
         Produces short imperative instructions that a model can follow
@@ -688,7 +713,11 @@ def get_active_profile(profile_path: Path | None = None) -> PersonalProfile:
     """
     from src.config import settings
 
-    path = Path(profile_path) if profile_path else settings.data_dir / "profile" / "personal_profile.json"
+    path = (
+        Path(profile_path)
+        if profile_path
+        else settings.data_dir / "profile" / "personal_profile.json"
+    )
     cache_key = str(path)
 
     if cache_key in _profile_cache:

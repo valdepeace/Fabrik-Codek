@@ -6,9 +6,11 @@ import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
+from tenacity import RetryError
 
-from src.knowledge.rag import RAGEngine, EMBEDDING_DIM
+from src.knowledge.rag import EMBEDDING_DIM, RAGEngine
 
 
 @pytest.fixture
@@ -176,7 +178,9 @@ class TestRAGEngineInit:
                         assert e._table is mock_table
                     # After exit, client should be closed
                     assert e._http_client.is_closed
+
             asyncio.run(_run())
+
         _test()
 
     def test_init_opens_existing_table(self, tmp_dir):
@@ -194,7 +198,9 @@ class TestRAGEngineInit:
                     mock_db.open_table.assert_called_once_with("knowledge")
                     mock_db.create_table.assert_not_called()
                     await engine.close()
+
             asyncio.run(_run())
+
         _test()
 
     def test_init_creates_new_table(self, tmp_dir):
@@ -212,7 +218,9 @@ class TestRAGEngineInit:
                     mock_db.create_table.assert_called_once()
                     mock_db.open_table.assert_not_called()
                     await engine.close()
+
             asyncio.run(_run())
+
         _test()
 
     def test_close_with_no_client(self):
@@ -222,7 +230,9 @@ class TestRAGEngineInit:
                 engine._http_client = None
                 # Should not raise
                 await engine.close()
+
             asyncio.run(_run())
+
         _test()
 
     def test_close_calls_aclose(self):
@@ -233,7 +243,9 @@ class TestRAGEngineInit:
                 engine._http_client = mock_client
                 await engine.close()
                 mock_client.aclose.assert_awaited_once()
+
             asyncio.run(_run())
+
         _test()
 
 
@@ -254,7 +266,9 @@ class TestEmbeddings:
                 assert "/api/embeddings" in call_args[0][0]
                 assert call_args[1]["json"]["model"] == "nomic-embed-text"
                 assert call_args[1]["json"]["prompt"] == "test text"
+
             asyncio.run(_run())
+
         _test()
 
     def test_get_embedding_raises_on_http_error(self):
@@ -263,12 +277,19 @@ class TestEmbeddings:
                 engine = _make_engine()
                 engine._http_client = AsyncMock()
                 mock_response = MagicMock()
-                mock_response.raise_for_status.side_effect = Exception("HTTP 500")
+                mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+                    "Server Error",
+                    request=MagicMock(),
+                    response=MagicMock(status_code=500),
+                )
                 engine._http_client.post = AsyncMock(return_value=mock_response)
 
-                with pytest.raises(Exception, match="HTTP 500"):
+                with pytest.raises(RetryError):
                     await engine._get_embedding("test text")
+                assert engine._http_client.post.call_count == 3
+
             asyncio.run(_run())
+
         _test()
 
     def test_batch_embeddings(self):
@@ -284,7 +305,9 @@ class TestEmbeddings:
                 # Each result should be a valid embedding
                 for emb in result:
                     assert len(emb) == EMBEDDING_DIM
+
             asyncio.run(_run())
+
         _test()
 
     def test_batch_embeddings_single_batch(self):
@@ -297,7 +320,9 @@ class TestEmbeddings:
                 result = await engine._get_embeddings_batch(texts, batch_size=10)
                 assert len(result) == 3
                 assert engine._http_client.post.call_count == 3
+
             asyncio.run(_run())
+
         _test()
 
     def test_batch_embeddings_empty(self):
@@ -309,7 +334,9 @@ class TestEmbeddings:
                 result = await engine._get_embeddings_batch([], batch_size=10)
                 assert result == []
                 engine._http_client.post.assert_not_called()
+
             asyncio.run(_run())
+
         _test()
 
     def test_batch_embeddings_exact_batch_size(self):
@@ -321,7 +348,176 @@ class TestEmbeddings:
                 texts = [f"text {i}" for i in range(10)]
                 result = await engine._get_embeddings_batch(texts, batch_size=10)
                 assert len(result) == 10
+
             asyncio.run(_run())
+
+        _test()
+
+    def test_get_embedding_retries_on_connect_error(self):
+        """Retry on connection errors (Ollama down)."""
+
+        def _test():
+            async def _run():
+                engine = _make_engine()
+                engine._http_client = AsyncMock()
+                engine._http_client.post = AsyncMock(
+                    side_effect=httpx.ConnectError("Connection refused")
+                )
+
+                with pytest.raises(RetryError):
+                    await engine._get_embedding("test text")
+                assert engine._http_client.post.call_count == 3
+
+            asyncio.run(_run())
+
+        _test()
+
+    def test_get_embedding_retries_on_timeout(self):
+        """Retry on timeout errors (Ollama slow/overloaded)."""
+
+        def _test():
+            async def _run():
+                engine = _make_engine()
+                engine._http_client = AsyncMock()
+                engine._http_client.post = AsyncMock(
+                    side_effect=httpx.ReadTimeout("Read timed out")
+                )
+
+                with pytest.raises(RetryError):
+                    await engine._get_embedding("test text")
+                assert engine._http_client.post.call_count == 3
+
+            asyncio.run(_run())
+
+        _test()
+
+    def test_get_embedding_retries_on_os_error(self):
+        """Retry on OS-level network errors."""
+
+        def _test():
+            async def _run():
+                engine = _make_engine()
+                engine._http_client = AsyncMock()
+                engine._http_client.post = AsyncMock(side_effect=OSError("Network unreachable"))
+
+                with pytest.raises(RetryError):
+                    await engine._get_embedding("test text")
+                assert engine._http_client.post.call_count == 3
+
+            asyncio.run(_run())
+
+        _test()
+
+    def test_get_embedding_retries_on_429(self):
+        """Retry on 429 Too Many Requests (rate limited)."""
+
+        def _test():
+            async def _run():
+                engine = _make_engine()
+                engine._http_client = AsyncMock()
+                mock_response = MagicMock()
+                mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+                    "Too Many Requests",
+                    request=MagicMock(),
+                    response=MagicMock(status_code=429),
+                )
+                engine._http_client.post = AsyncMock(return_value=mock_response)
+
+                with pytest.raises(RetryError):
+                    await engine._get_embedding("test text")
+                assert engine._http_client.post.call_count == 3
+
+            asyncio.run(_run())
+
+        _test()
+
+    def test_get_embedding_no_retry_on_4xx(self):
+        """Do NOT retry on non-retryable client errors (e.g. 404) — they are permanent."""
+
+        def _test():
+            async def _run():
+                engine = _make_engine()
+                engine._http_client = AsyncMock()
+                mock_response = MagicMock()
+                mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+                    "Not Found",
+                    request=MagicMock(),
+                    response=MagicMock(status_code=404),
+                )
+                engine._http_client.post = AsyncMock(return_value=mock_response)
+
+                with pytest.raises(httpx.HTTPStatusError):
+                    await engine._get_embedding("test text")
+                assert engine._http_client.post.call_count == 1
+
+            asyncio.run(_run())
+
+        _test()
+
+    def test_get_embedding_succeeds_after_transient_failure(self):
+        """Succeeds on second attempt after one transient failure."""
+
+        def _test():
+            async def _run():
+                engine = _make_engine()
+                engine._http_client = AsyncMock()
+                mock_success = MagicMock()
+                mock_success.json.return_value = {"embedding": _fake_embedding()}
+                mock_success.raise_for_status = MagicMock()
+
+                engine._http_client.post = AsyncMock(
+                    side_effect=[
+                        httpx.ConnectError("Connection refused"),
+                        mock_success,
+                    ]
+                )
+
+                result = await engine._get_embedding("test text")
+                assert len(result) == EMBEDDING_DIM
+                assert engine._http_client.post.call_count == 2
+
+            asyncio.run(_run())
+
+        _test()
+
+    def test_get_embedding_no_retry_on_success(self):
+        """Normal successful call — only 1 attempt, no retry."""
+
+        def _test():
+            async def _run():
+                engine = _make_engine()
+                _setup_mock_http(engine)
+
+                result = await engine._get_embedding("test text")
+                assert len(result) == EMBEDDING_DIM
+                assert engine._http_client.post.call_count == 1
+
+            asyncio.run(_run())
+
+        _test()
+
+
+class TestRetrieveRetryError:
+    """Tests for retrieve() graceful degradation on retry exhaustion."""
+
+    def test_retrieve_returns_empty_on_retry_exhaustion(self):
+        """retrieve() returns [] when embedding fails after all retries."""
+
+        def _test():
+            async def _run():
+                engine = _make_engine()
+                engine._http_client = AsyncMock()
+                engine._http_client.post = AsyncMock(
+                    side_effect=httpx.ConnectError("Connection refused")
+                )
+                engine._table = MagicMock()
+
+                results = await engine.retrieve("test query")
+                assert results == []
+                engine._table.search.assert_not_called()
+
+            asyncio.run(_run())
+
         _test()
 
 
@@ -334,7 +530,9 @@ class TestIndexFile:
                 engine = _make_engine()
                 result = await engine.index_file(Path("/nonexistent/file.txt"))
                 assert result == 0
+
             asyncio.run(_run())
+
         _test()
 
     def test_index_empty_file(self, tmp_dir):
@@ -345,7 +543,9 @@ class TestIndexFile:
                 empty_file.write_text("")
                 result = await engine.index_file(empty_file)
                 assert result == 0
+
             asyncio.run(_run())
+
         _test()
 
     def test_index_whitespace_only_file(self, tmp_dir):
@@ -356,7 +556,9 @@ class TestIndexFile:
                 ws_file.write_text("   \n\t\n  ")
                 result = await engine.index_file(ws_file)
                 assert result == 0
+
             asyncio.run(_run())
+
         _test()
 
     def test_index_valid_file(self, tmp_dir):
@@ -367,7 +569,9 @@ class TestIndexFile:
                 engine._table = MagicMock()
 
                 test_file = tmp_dir / "test.md"
-                test_file.write_text("This is a test document with enough content to be indexed properly.")
+                test_file.write_text(
+                    "This is a test document with enough content to be indexed properly."
+                )
 
                 result = await engine.index_file(test_file, category="test", project="testproj")
                 assert result > 0
@@ -380,7 +584,9 @@ class TestIndexFile:
                     assert doc["project"] == "testproj"
                     assert doc["source"] == str(test_file)
                     assert len(doc["vector"]) == EMBEDDING_DIM
+
             asyncio.run(_run())
+
         _test()
 
     def test_index_large_file_multiple_chunks(self, tmp_dir):
@@ -396,7 +602,9 @@ class TestIndexFile:
                 result = await engine.index_file(test_file, category="docs")
                 assert result > 1  # Should produce multiple chunks
                 engine._table.add.assert_called_once()
+
             asyncio.run(_run())
+
         _test()
 
     def test_index_file_default_category_and_project(self, tmp_dir):
@@ -414,7 +622,9 @@ class TestIndexFile:
                 added_docs = engine._table.add.call_args[0][0]
                 assert added_docs[0]["category"] == "general"
                 assert added_docs[0]["project"] == ""
+
             asyncio.run(_run())
+
         _test()
 
     def test_index_file_unique_ids(self, tmp_dir):
@@ -427,12 +637,14 @@ class TestIndexFile:
                 test_file = tmp_dir / "multichunk.md"
                 test_file.write_text("Word " * 500)  # Multiple chunks
 
-                result = await engine.index_file(test_file)
+                await engine.index_file(test_file)
                 added_docs = engine._table.add.call_args[0][0]
                 ids = [doc["id"] for doc in added_docs]
                 # All IDs should be unique
                 assert len(ids) == len(set(ids))
+
             asyncio.run(_run())
+
         _test()
 
 
@@ -445,7 +657,9 @@ class TestIndexJsonl:
                 engine = _make_engine()
                 result = await engine.index_jsonl(Path("/nonexistent/file.jsonl"))
                 assert result == 0
+
             asyncio.run(_run())
+
         _test()
 
     def test_index_valid_jsonl(self, tmp_dir):
@@ -457,8 +671,17 @@ class TestIndexJsonl:
 
                 jsonl_file = tmp_dir / "pairs.jsonl"
                 pairs = [
-                    {"instruction": "How to use FastAPI?", "output": "FastAPI is a modern web framework for building APIs. " * 5, "category": "api"},
-                    {"instruction": "Explain Docker", "output": "Docker is a containerization platform that allows packaging. " * 5, "category": "devops"},
+                    {
+                        "instruction": "How to use FastAPI?",
+                        "output": "FastAPI is a modern web framework for building APIs. " * 5,
+                        "category": "api",
+                    },
+                    {
+                        "instruction": "Explain Docker",
+                        "output": "Docker is a containerization platform that allows packaging. "
+                        * 5,
+                        "category": "devops",
+                    },
                 ]
                 with open(jsonl_file, "w") as f:
                     for p in pairs:
@@ -472,7 +695,9 @@ class TestIndexJsonl:
                 # Text should combine instruction + output
                 assert added_docs[0]["text"].startswith("Q: How to use FastAPI?")
                 assert "A: FastAPI" in added_docs[0]["text"]
+
             asyncio.run(_run())
+
         _test()
 
     def test_index_jsonl_skips_short_text(self, tmp_dir):
@@ -489,7 +714,9 @@ class TestIndexJsonl:
                 result = await engine.index_jsonl(jsonl_file)
                 assert result == 0
                 engine._table.add.assert_not_called()
+
             asyncio.run(_run())
+
         _test()
 
     def test_index_jsonl_skips_malformed(self, tmp_dir):
@@ -502,11 +729,21 @@ class TestIndexJsonl:
                 jsonl_file = tmp_dir / "mixed.jsonl"
                 with open(jsonl_file, "w") as f:
                     f.write("not valid json\n")
-                    f.write(json.dumps({"instruction": "Q", "output": "A valid output with enough text to pass filter. " * 5}) + "\n")
+                    f.write(
+                        json.dumps(
+                            {
+                                "instruction": "Q",
+                                "output": "A valid output with enough text to pass filter. " * 5,
+                            }
+                        )
+                        + "\n"
+                    )
 
                 result = await engine.index_jsonl(jsonl_file)
                 assert result == 1
+
             asyncio.run(_run())
+
         _test()
 
     def test_index_jsonl_custom_text_field(self, tmp_dir):
@@ -518,11 +755,21 @@ class TestIndexJsonl:
 
                 jsonl_file = tmp_dir / "custom.jsonl"
                 with open(jsonl_file, "w") as f:
-                    f.write(json.dumps({"description": "A detailed description of the code change that was made. " * 3}) + "\n")
+                    f.write(
+                        json.dumps(
+                            {
+                                "description": "A detailed description of the code change that was made. "
+                                * 3
+                            }
+                        )
+                        + "\n"
+                    )
 
                 result = await engine.index_jsonl(jsonl_file, text_field="description")
                 assert result == 1
+
             asyncio.run(_run())
+
         _test()
 
     def test_index_jsonl_no_instruction_field(self, tmp_dir):
@@ -534,14 +781,24 @@ class TestIndexJsonl:
 
                 jsonl_file = tmp_dir / "noinstruction.jsonl"
                 with open(jsonl_file, "w") as f:
-                    f.write(json.dumps({"output": "A long output without any instruction field to combine with. " * 3}) + "\n")
+                    f.write(
+                        json.dumps(
+                            {
+                                "output": "A long output without any instruction field to combine with. "
+                                * 3
+                            }
+                        )
+                        + "\n"
+                    )
 
                 result = await engine.index_jsonl(jsonl_file)
                 assert result == 1
                 added_docs = engine._table.add.call_args[0][0]
                 # Without instruction, text should just be the output (no "Q:" prefix)
                 assert not added_docs[0]["text"].startswith("Q:")
+
             asyncio.run(_run())
+
         _test()
 
     def test_index_jsonl_custom_category(self, tmp_dir):
@@ -553,14 +810,24 @@ class TestIndexJsonl:
 
                 jsonl_file = tmp_dir / "cat.jsonl"
                 with open(jsonl_file, "w") as f:
-                    f.write(json.dumps({"output": "Content with enough text to be indexed and pass the filter. " * 3}) + "\n")
+                    f.write(
+                        json.dumps(
+                            {
+                                "output": "Content with enough text to be indexed and pass the filter. "
+                                * 3
+                            }
+                        )
+                        + "\n"
+                    )
 
                 result = await engine.index_jsonl(jsonl_file, category="code_change")
                 assert result == 1
                 added_docs = engine._table.add.call_args[0][0]
                 # Default category from data should be "code_change" (from param)
                 assert added_docs[0]["category"] == "code_change"
+
             asyncio.run(_run())
+
         _test()
 
     def test_index_jsonl_uses_category_from_data(self, tmp_dir):
@@ -572,17 +839,25 @@ class TestIndexJsonl:
 
                 jsonl_file = tmp_dir / "cat_in_data.jsonl"
                 with open(jsonl_file, "w") as f:
-                    f.write(json.dumps({
-                        "output": "Content with enough text to pass filter and be indexed properly. " * 3,
-                        "category": "debugging"
-                    }) + "\n")
+                    f.write(
+                        json.dumps(
+                            {
+                                "output": "Content with enough text to pass filter and be indexed properly. "
+                                * 3,
+                                "category": "debugging",
+                            }
+                        )
+                        + "\n"
+                    )
 
                 result = await engine.index_jsonl(jsonl_file, category="training")
                 assert result == 1
                 added_docs = engine._table.add.call_args[0][0]
                 # Category from data should override parameter
                 assert added_docs[0]["category"] == "debugging"
+
             asyncio.run(_run())
+
         _test()
 
     def test_index_jsonl_empty_file(self, tmp_dir):
@@ -597,7 +872,9 @@ class TestIndexJsonl:
                 result = await engine.index_jsonl(jsonl_file)
                 assert result == 0
                 engine._table.add.assert_not_called()
+
             asyncio.run(_run())
+
         _test()
 
     def test_index_jsonl_project_from_source_file(self, tmp_dir):
@@ -609,16 +886,24 @@ class TestIndexJsonl:
 
                 jsonl_file = tmp_dir / "proj.jsonl"
                 with open(jsonl_file, "w") as f:
-                    f.write(json.dumps({
-                        "output": "Content with enough text to pass the fifty character filter easily. " * 3,
-                        "source_file": "myapp/src/main.py"
-                    }) + "\n")
+                    f.write(
+                        json.dumps(
+                            {
+                                "output": "Content with enough text to pass the fifty character filter easily. "
+                                * 3,
+                                "source_file": "myproject/src/main.py",
+                            }
+                        )
+                        + "\n"
+                    )
 
                 result = await engine.index_jsonl(jsonl_file)
                 assert result == 1
                 added_docs = engine._table.add.call_args[0][0]
-                assert added_docs[0]["project"] == "myapp"
+                assert added_docs[0]["project"] == "myproject"
+
             asyncio.run(_run())
+
         _test()
 
 
@@ -633,7 +918,9 @@ class TestIndexDatalake:
                     engine = _make_engine()
                     stats = await engine.index_datalake()
                     assert stats == {"files_indexed": 0, "chunks_created": 0, "errors": 0}
+
             asyncio.run(_run())
+
         _test()
 
     def test_datalake_indexes_training_pairs(self, tmp_dir):
@@ -657,7 +944,9 @@ class TestIndexDatalake:
                     assert stats["chunks_created"] >= 5
                     assert stats["errors"] == 0
                     engine.index_jsonl.assert_called()
+
             asyncio.run(_run())
+
         _test()
 
     def test_datalake_indexes_decisions(self, tmp_dir):
@@ -680,10 +969,14 @@ class TestIndexDatalake:
                     # index_file should have been called with category="decision"
                     found_decision_call = False
                     for call in engine.index_file.call_args_list:
-                        if call[1].get("category") == "decision" or (len(call[0]) > 1 and call[0][1] == "decision"):
+                        if call[1].get("category") == "decision" or (
+                            len(call[0]) > 1 and call[0][1] == "decision"
+                        ):
                             found_decision_call = True
                     assert found_decision_call
+
             asyncio.run(_run())
+
         _test()
 
     def test_datalake_indexes_learnings(self, tmp_dir):
@@ -705,10 +998,14 @@ class TestIndexDatalake:
                     assert stats["files_indexed"] >= 1
                     found_learning_call = False
                     for call in engine.index_file.call_args_list:
-                        if call[1].get("category") == "learning" or (len(call[0]) > 1 and call[0][1] == "learning"):
+                        if call[1].get("category") == "learning" or (
+                            len(call[0]) > 1 and call[0][1] == "learning"
+                        ):
                             found_learning_call = True
                     assert found_learning_call
+
             asyncio.run(_run())
+
         _test()
 
     def test_datalake_indexes_code_changes(self, tmp_dir):
@@ -717,7 +1014,9 @@ class TestIndexDatalake:
                 code_dir = tmp_dir / "01-raw" / "code-changes"
                 code_dir.mkdir(parents=True)
                 jsonl_file = code_dir / "2026-02-01_auto-captures.jsonl"
-                jsonl_file.write_text(json.dumps({"description": "Changed authentication" * 10}) + "\n")
+                jsonl_file.write_text(
+                    json.dumps({"description": "Changed authentication" * 10}) + "\n"
+                )
 
                 with patch("src.knowledge.rag.settings") as mock_settings:
                     mock_settings.datalake_path = tmp_dir
@@ -732,10 +1031,15 @@ class TestIndexDatalake:
                     found_code_change = False
                     for call in engine.index_jsonl.call_args_list:
                         kwargs = call[1]
-                        if kwargs.get("text_field") == "description" and kwargs.get("category") == "code_change":
+                        if (
+                            kwargs.get("text_field") == "description"
+                            and kwargs.get("category") == "code_change"
+                        ):
                             found_code_change = True
                     assert found_code_change
+
             asyncio.run(_run())
+
         _test()
 
     def test_datalake_handles_errors(self, tmp_dir):
@@ -755,7 +1059,9 @@ class TestIndexDatalake:
 
                     stats = await engine.index_datalake()
                     assert stats["errors"] >= 1
+
             asyncio.run(_run())
+
         _test()
 
     def test_datalake_empty_dirs(self, tmp_dir):
@@ -778,7 +1084,9 @@ class TestIndexDatalake:
                     assert stats["files_indexed"] == 0
                     assert stats["chunks_created"] == 0
                     assert stats["errors"] == 0
+
             asyncio.run(_run())
+
         _test()
 
 
@@ -809,7 +1117,9 @@ class TestRetrieve:
                 assert results[1]["text"] == "result2"
                 assert results[1]["score"] == 0.2
                 mock_search.limit.assert_called_once_with(5)
+
             asyncio.run(_run())
+
         _test()
 
     def test_retrieve_with_category_filter(self):
@@ -831,7 +1141,9 @@ class TestRetrieve:
                 results = await engine.retrieve("test", category="api")
                 mock_limit.where.assert_called_once_with("category = 'api'")
                 assert results == []
+
             asyncio.run(_run())
+
         _test()
 
     def test_retrieve_empty_results(self):
@@ -849,7 +1161,9 @@ class TestRetrieve:
 
                 results = await engine.retrieve("nonexistent topic")
                 assert results == []
+
             asyncio.run(_run())
+
         _test()
 
     def test_retrieve_default_limit(self):
@@ -867,7 +1181,9 @@ class TestRetrieve:
 
                 await engine.retrieve("query")
                 mock_search.limit.assert_called_once_with(5)  # Default limit
+
             asyncio.run(_run())
+
         _test()
 
     def test_retrieve_result_format(self):
@@ -878,7 +1194,12 @@ class TestRetrieve:
 
                 mock_to_list = MagicMock()
                 mock_to_list.to_list.return_value = [
-                    {"text": "sample", "source": "path/to/file", "category": "docs", "_distance": 0.05},
+                    {
+                        "text": "sample",
+                        "source": "path/to/file",
+                        "category": "docs",
+                        "_distance": 0.05,
+                    },
                 ]
                 mock_search = MagicMock()
                 mock_search.limit.return_value = mock_to_list
@@ -893,7 +1214,9 @@ class TestRetrieve:
                 assert result["source"] == "path/to/file"
                 assert result["category"] == "docs"
                 assert result["score"] == 0.05
+
             asyncio.run(_run())
+
         _test()
 
     def test_retrieve_missing_distance_field(self):
@@ -913,7 +1236,9 @@ class TestRetrieve:
 
                 results = await engine.retrieve("test")
                 assert results[0]["score"] == 0  # Default when _distance missing
+
             asyncio.run(_run())
+
         _test()
 
 
@@ -927,49 +1252,73 @@ class TestQueryWithContext:
                 engine.retrieve = AsyncMock(return_value=[])
                 result = await engine.query_with_context("test query")
                 assert result == "test query"
+
             asyncio.run(_run())
+
         _test()
 
     def test_results_inject_context(self):
         def _test():
             async def _run():
                 engine = _make_engine()
-                engine.retrieve = AsyncMock(return_value=[
-                    {"text": "Context about FastAPI", "category": "api", "score": 0.1, "source": "f"},
-                ])
+                engine.retrieve = AsyncMock(
+                    return_value=[
+                        {
+                            "text": "Context about FastAPI",
+                            "category": "api",
+                            "score": 0.1,
+                            "source": "f",
+                        },
+                    ]
+                )
                 result = await engine.query_with_context("How to use FastAPI?")
-                assert "Relevant context" in result
+                assert "Contexto relevante" in result
                 assert "Context about FastAPI" in result
                 assert "How to use FastAPI?" in result
-                assert "Question:" in result
+                assert "Pregunta:" in result
+
             asyncio.run(_run())
+
         _test()
 
     def test_multiple_results_joined(self):
         def _test():
             async def _run():
                 engine = _make_engine()
-                engine.retrieve = AsyncMock(return_value=[
-                    {"text": "First context", "category": "api", "score": 0.1, "source": "f1"},
-                    {"text": "Second context", "category": "docs", "score": 0.2, "source": "f2"},
-                ])
+                engine.retrieve = AsyncMock(
+                    return_value=[
+                        {"text": "First context", "category": "api", "score": 0.1, "source": "f1"},
+                        {
+                            "text": "Second context",
+                            "category": "docs",
+                            "score": 0.2,
+                            "source": "f2",
+                        },
+                    ]
+                )
                 result = await engine.query_with_context("test query")
                 assert "First context" in result
                 assert "Second context" in result
                 assert "---" in result  # Separator between contexts
+
             asyncio.run(_run())
+
         _test()
 
     def test_context_includes_category_prefix(self):
         def _test():
             async def _run():
                 engine = _make_engine()
-                engine.retrieve = AsyncMock(return_value=[
-                    {"text": "Some text", "category": "debugging", "score": 0.1, "source": "f"},
-                ])
+                engine.retrieve = AsyncMock(
+                    return_value=[
+                        {"text": "Some text", "category": "debugging", "score": 0.1, "source": "f"},
+                    ]
+                )
                 result = await engine.query_with_context("test")
                 assert "[debugging]" in result
+
             asyncio.run(_run())
+
         _test()
 
     def test_long_text_truncated_in_context(self):
@@ -977,16 +1326,20 @@ class TestQueryWithContext:
             async def _run():
                 engine = _make_engine()
                 long_text = "A" * 1000
-                engine.retrieve = AsyncMock(return_value=[
-                    {"text": long_text, "category": "test", "score": 0.1, "source": "f"},
-                ])
+                engine.retrieve = AsyncMock(
+                    return_value=[
+                        {"text": long_text, "category": "test", "score": 0.1, "source": "f"},
+                    ]
+                )
                 result = await engine.query_with_context("test")
                 # Text should be truncated to 500 chars in context
                 # Count the A's in the result - should be at most 500
-                context_section = result.split("Question:")[0]
+                context_section = result.split("Pregunta:")[0]
                 a_count = context_section.count("A")
                 assert a_count == 500
+
             asyncio.run(_run())
+
         _test()
 
     def test_custom_limit(self):
@@ -996,7 +1349,9 @@ class TestQueryWithContext:
                 engine.retrieve = AsyncMock(return_value=[])
                 await engine.query_with_context("test", limit=10)
                 engine.retrieve.assert_called_once_with("test", limit=10)
+
             asyncio.run(_run())
+
         _test()
 
     def test_default_limit_is_three(self):
@@ -1006,7 +1361,9 @@ class TestQueryWithContext:
                 engine.retrieve = AsyncMock(return_value=[])
                 await engine.query_with_context("test")
                 engine.retrieve.assert_called_once_with("test", limit=3)
+
             asyncio.run(_run())
+
         _test()
 
 
@@ -1060,6 +1417,7 @@ class TestGetRagEngine:
         def _test():
             async def _run():
                 import src.knowledge.rag as rag_module
+
                 # Reset singleton
                 rag_module._rag_engine = None
 
@@ -1081,5 +1439,7 @@ class TestGetRagEngine:
                 if rag_module._rag_engine and rag_module._rag_engine._http_client:
                     await rag_module._rag_engine.close()
                 rag_module._rag_engine = None
+
             asyncio.run(_run())
+
         _test()

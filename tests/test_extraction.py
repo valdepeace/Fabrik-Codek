@@ -8,21 +8,20 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from scripts import extract_reasoning as er
+from scripts.enrich_auto_captures import (
+    determine_confidence,
+    enrich_record,
+    find_tool_use_message,
+    load_transcript,
+    walk_up_for_context,
+)
 from src.core.llm_client import LLMResponse
 from src.knowledge.extraction.heuristic import HeuristicExtractor
 from src.knowledge.extraction.llm_extractor import LLMExtractor
 from src.knowledge.extraction.pipeline import ExtractionPipeline, _parse_multiline_json
 from src.knowledge.graph_engine import GraphEngine
 from src.knowledge.graph_schema import EntityType, RelationType
-
-from scripts.enrich_auto_captures import (
-    load_transcript,
-    find_tool_use_message,
-    walk_up_for_context,
-    determine_confidence,
-    enrich_record,
-)
-from scripts import extract_reasoning as er
 
 
 @pytest.fixture
@@ -101,11 +100,14 @@ class TestHeuristicExtractor:
             "category": "database",
         }
         triples = extractor.extract_from_pair(pair, source_doc="test:6")
-        related = [t for t in triples
-                   if t.relation_type == RelationType.RELATED_TO
-                   and t.subject_type == EntityType.TECHNOLOGY
-                   and t.object_type == EntityType.TECHNOLOGY
-                   and t.subject_name != t.object_name]
+        related = [
+            t
+            for t in triples
+            if t.relation_type == RelationType.RELATED_TO
+            and t.subject_type == EntityType.TECHNOLOGY
+            and t.object_type == EntityType.TECHNOLOGY
+            and t.subject_name != t.object_name
+        ]
         assert len(related) > 0
 
     def test_empty_pair(self, extractor):
@@ -120,10 +122,7 @@ class TestHeuristicExtractor:
             "category": "testing",
         }
         triples = extractor.extract_from_pair(pair, source_doc="test:7")
-        category_rels = [
-            t for t in triples
-            if t.object_type == EntityType.CATEGORY
-        ]
+        category_rels = [t for t in triples if t.object_type == EntityType.CATEGORY]
         assert len(category_rels) > 0
 
     def test_extract_from_decision(self, extractor):
@@ -182,15 +181,17 @@ class TestLLMExtractor:
 
     def test_parse_valid_json(self):
         extractor = LLMExtractor()
-        response = json.dumps({
-            "entities": [
-                {"name": "FastAPI", "type": "technology"},
-                {"name": "Pydantic", "type": "technology"},
-            ],
-            "relations": [
-                {"source": "FastAPI", "target": "Pydantic", "type": "uses"},
-            ],
-        })
+        response = json.dumps(
+            {
+                "entities": [
+                    {"name": "FastAPI", "type": "technology"},
+                    {"name": "Pydantic", "type": "technology"},
+                ],
+                "relations": [
+                    {"source": "FastAPI", "target": "Pydantic", "type": "uses"},
+                ],
+            }
+        )
         triples = extractor._parse_llm_response(response, source_doc="test")
         assert len(triples) == 1
         assert triples[0].relation_type == RelationType.USES
@@ -219,15 +220,17 @@ class TestLLMExtractor:
     def test_parse_unknown_entity_type_fallback(self):
         """Unknown entity types should fallback to TECHNOLOGY for common aliases, CONCEPT for unknown."""
         extractor = LLMExtractor()
-        response = json.dumps({
-            "entities": [
-                {"name": "Redis", "type": "library"},
-                {"name": "caching", "type": "unknown_type"},
-            ],
-            "relations": [
-                {"source": "Redis", "target": "caching", "type": "uses"},
-            ],
-        })
+        response = json.dumps(
+            {
+                "entities": [
+                    {"name": "Redis", "type": "library"},
+                    {"name": "caching", "type": "unknown_type"},
+                ],
+                "relations": [
+                    {"source": "Redis", "target": "caching", "type": "uses"},
+                ],
+            }
+        )
         triples = extractor._parse_llm_response(response, source_doc="test")
         assert len(triples) == 1
         assert triples[0].subject_type == EntityType.TECHNOLOGY
@@ -236,15 +239,17 @@ class TestLLMExtractor:
     def test_parse_unknown_relation_type_fallback(self):
         """Unknown relation types should fallback to RELATED_TO."""
         extractor = LLMExtractor()
-        response = json.dumps({
-            "entities": [
-                {"name": "A", "type": "concept"},
-                {"name": "B", "type": "concept"},
-            ],
-            "relations": [
-                {"source": "A", "target": "B", "type": "implements"},
-            ],
-        })
+        response = json.dumps(
+            {
+                "entities": [
+                    {"name": "A", "type": "concept"},
+                    {"name": "B", "type": "concept"},
+                ],
+                "relations": [
+                    {"source": "A", "target": "B", "type": "implements"},
+                ],
+            }
+        )
         triples = extractor._parse_llm_response(response, source_doc="test")
         assert len(triples) == 1
         assert triples[0].relation_type == RelationType.RELATED_TO
@@ -252,17 +257,19 @@ class TestLLMExtractor:
     def test_parse_empty_source_target_discarded(self):
         """Relations with empty source or target should be silently discarded."""
         extractor = LLMExtractor()
-        response = json.dumps({
-            "entities": [
-                {"name": "FastAPI", "type": "technology"},
-                {"name": "Pydantic", "type": "technology"},
-            ],
-            "relations": [
-                {"source": "", "target": "FastAPI", "type": "uses"},
-                {"source": "FastAPI", "target": "  ", "type": "uses"},
-                {"source": "FastAPI", "target": "Pydantic", "type": "uses"},
-            ],
-        })
+        response = json.dumps(
+            {
+                "entities": [
+                    {"name": "FastAPI", "type": "technology"},
+                    {"name": "Pydantic", "type": "technology"},
+                ],
+                "relations": [
+                    {"source": "", "target": "FastAPI", "type": "uses"},
+                    {"source": "FastAPI", "target": "  ", "type": "uses"},
+                    {"source": "FastAPI", "target": "Pydantic", "type": "uses"},
+                ],
+            }
+        )
         triples = extractor._parse_llm_response(response, source_doc="test")
         assert len(triples) == 1
         assert triples[0].subject_name == "fastapi"
@@ -278,15 +285,28 @@ class TestLLMExtractor:
     def test_parse_extra_fields_ignored(self):
         """Extra fields in entities/relations should be ignored without error."""
         extractor = LLMExtractor()
-        response = json.dumps({
-            "entities": [
-                {"name": "FastAPI", "type": "technology", "description": "web framework", "extra": True},
-                {"name": "Python", "type": "technology"},
-            ],
-            "relations": [
-                {"source": "FastAPI", "target": "Python", "type": "uses", "confidence": 0.9, "note": "obvious"},
-            ],
-        })
+        response = json.dumps(
+            {
+                "entities": [
+                    {
+                        "name": "FastAPI",
+                        "type": "technology",
+                        "description": "web framework",
+                        "extra": True,
+                    },
+                    {"name": "Python", "type": "technology"},
+                ],
+                "relations": [
+                    {
+                        "source": "FastAPI",
+                        "target": "Python",
+                        "type": "uses",
+                        "confidence": 0.9,
+                        "note": "obvious",
+                    },
+                ],
+            }
+        )
         triples = extractor._parse_llm_response(response, source_doc="test")
         assert len(triples) == 1
 
@@ -319,17 +339,19 @@ class TestLLMExtractFromPair:
     @pytest.fixture
     def llm_response_valid(self):
         return LLMResponse(
-            content=json.dumps({
-                "entities": [
-                    {"name": "FastAPI", "type": "technology"},
-                    {"name": "Pydantic", "type": "technology"},
-                    {"name": "REST API", "type": "concept"},
-                ],
-                "relations": [
-                    {"source": "FastAPI", "target": "Pydantic", "type": "uses"},
-                    {"source": "REST API", "target": "FastAPI", "type": "depends_on"},
-                ],
-            }),
+            content=json.dumps(
+                {
+                    "entities": [
+                        {"name": "FastAPI", "type": "technology"},
+                        {"name": "Pydantic", "type": "technology"},
+                        {"name": "REST API", "type": "concept"},
+                    ],
+                    "relations": [
+                        {"source": "FastAPI", "target": "Pydantic", "type": "uses"},
+                        {"source": "REST API", "target": "FastAPI", "type": "depends_on"},
+                    ],
+                }
+            ),
             model="qwen2.5-coder:7b",
             tokens_used=150,
             latency_ms=2500.0,
@@ -352,7 +374,9 @@ class TestLLMExtractFromPair:
 
         asyncio.run(_test())
 
-    def test_prompt_uses_instruction_not_output(self, llm_extractor, sample_pair, llm_response_valid):
+    def test_prompt_uses_instruction_not_output(
+        self, llm_extractor, sample_pair, llm_response_valid
+    ):
         async def _test():
             with patch("src.knowledge.extraction.llm_extractor.LLMClient") as MockClient:
                 mock_instance = AsyncMock()
@@ -428,10 +452,12 @@ class TestLLMExtractBatch:
     @pytest.fixture
     def valid_response(self):
         return LLMResponse(
-            content=json.dumps({
-                "entities": [{"name": "tool", "type": "technology"}],
-                "relations": [],
-            }),
+            content=json.dumps(
+                {
+                    "entities": [{"name": "tool", "type": "technology"}],
+                    "relations": [],
+                }
+            ),
             model="qwen2.5-coder:7b",
             tokens_used=50,
             latency_ms=1000.0,
@@ -448,7 +474,10 @@ class TestLLMExtractBatch:
                 mock_instance.__aexit__ = AsyncMock(return_value=False)
                 MockClient.return_value = mock_instance
 
-                pairs = [{"instruction": f"How to use tool {i}?", "category": "test", "topic": "tools"} for i in range(5)]
+                pairs = [
+                    {"instruction": f"How to use tool {i}?", "category": "test", "topic": "tools"}
+                    for i in range(5)
+                ]
                 source_docs = [f"test:{i}" for i in range(5)]
                 triples = await llm_extractor.extract_batch(pairs, source_docs, delay=0.0)
 
@@ -468,7 +497,9 @@ class TestLLMExtractBatch:
                 mock_instance.__aexit__ = AsyncMock(return_value=False)
                 MockClient.return_value = mock_instance
 
-                pairs = [{"instruction": f"test {i}", "category": "t", "topic": "t"} for i in range(10)]
+                pairs = [
+                    {"instruction": f"test {i}", "category": "t", "topic": "t"} for i in range(10)
+                ]
                 source_docs = [f"test:{i}" for i in range(10)]
                 triples = await llm_extractor.extract_batch(pairs, source_docs, delay=0.0)
 
@@ -498,9 +529,11 @@ class TestLLMExtractBatch:
                 mock_instance.__aexit__ = AsyncMock(return_value=False)
                 MockClient.return_value = mock_instance
 
-                pairs = [{"instruction": f"test {i}", "category": "t", "topic": "t"} for i in range(6)]
+                pairs = [
+                    {"instruction": f"test {i}", "category": "t", "topic": "t"} for i in range(6)
+                ]
                 source_docs = [f"test:{i}" for i in range(6)]
-                triples = await llm_extractor.extract_batch(pairs, source_docs, delay=0.0)
+                await llm_extractor.extract_batch(pairs, source_docs, delay=0.0)
 
                 # All 6 should be attempted (breaker never hit 5 consecutive)
                 assert mock_instance.generate.call_count == 6
@@ -547,12 +580,14 @@ class TestExtractionPipeline:
 
         # Patch settings to use our temp datalake
         from src.config import settings
+
         original_path = settings.datalake_path
         settings.datalake_path = tmp_dir
 
         try:
             pipeline = ExtractionPipeline(engine=engine, use_llm=False)
             import asyncio
+
             stats = asyncio.run(pipeline.build(force=True))
 
             assert stats["files_processed"] > 0
@@ -587,6 +622,7 @@ class TestExtractionPipeline:
         engine = GraphEngine(data_dir=graph_dir)
 
         from src.config import settings
+
         original_path = settings.datalake_path
         settings.datalake_path = tmp_dir
 
@@ -606,17 +642,64 @@ class TestExtractionPipeline:
         finally:
             settings.datalake_path = original_path
 
+    def test_pipeline_drift_stats_in_build(self, tmp_dir):
+        """Pipeline build includes drift detection stats."""
+        training_dir = tmp_dir / "02-processed" / "training-pairs"
+        training_dir.mkdir(parents=True)
+
+        pairs = [
+            {
+                "instruction": "How to use FastAPI?",
+                "output": "Use FastAPI with Pydantic.",
+                "category": "api",
+            }
+        ]
+        jsonl_file = training_dir / "test-drift.jsonl"
+        with open(jsonl_file, "w") as f:
+            for pair in pairs:
+                f.write(json.dumps(pair) + "\n")
+
+        graph_dir = tmp_dir / "graphdb"
+        engine = GraphEngine(data_dir=graph_dir)
+
+        from src.config import settings
+
+        original_path = settings.datalake_path
+        settings.datalake_path = tmp_dir
+
+        try:
+            import asyncio
+
+            pipeline = ExtractionPipeline(engine=engine, use_llm=False)
+            stats = asyncio.run(pipeline.build(force=True))
+
+            # Drift stats should be present
+            assert "drift_events" in stats
+            assert "snapshot_changed" in stats
+            # First build = no previous snapshot = 0 drift events
+            assert stats["drift_events"] == 0
+
+            # Verify entities have neighbor_snapshot in metadata
+            for entity in engine._entities.values():
+                assert "neighbor_snapshot" in entity.metadata
+                assert "created_at" in entity.metadata
+                assert "version" in entity.metadata
+        finally:
+            settings.datalake_path = original_path
+
     def test_pipeline_empty_datalake(self, tmp_dir):
         """Test pipeline with nonexistent datalake."""
         graph_dir = tmp_dir / "graphdb"
         engine = GraphEngine(data_dir=graph_dir)
 
         from src.config import settings
+
         original_path = settings.datalake_path
         settings.datalake_path = tmp_dir / "nonexistent"
 
         try:
             import asyncio
+
             pipeline = ExtractionPipeline(engine=engine, use_llm=False)
             stats = asyncio.run(pipeline.build())
             assert stats["files_processed"] == 0
@@ -633,7 +716,7 @@ class TestAutoCapture:
         record = {
             "type": "auto_capture",
             "tool": "Edit",
-            "project": "myapp",
+            "project": "myproject",
             "file_modified": "/home/user/project/src/main.py",
             "description": "Edit: old_string -> new_string",
         }
@@ -658,15 +741,15 @@ class TestAutoCapture:
         record = {
             "type": "auto_capture",
             "tool": "Write",
-            "project": "myapp",
+            "project": "myproject",
             "file_modified": "/home/user/project/app.ts",
             "description": "Write: new file",
         }
         triples = extractor.extract_from_auto_capture(record, source_doc="auto:3")
         uses_rels = [
-            t for t in triples
-            if t.relation_type == RelationType.USES
-            and t.subject_name == "myapp"
+            t
+            for t in triples
+            if t.relation_type == RelationType.USES and t.subject_name == "myproject"
         ]
         assert len(uses_rels) > 0
         assert any(t.object_name == "typescript" for t in uses_rels)
@@ -698,7 +781,8 @@ class TestAutoCapture:
         }
         triples = extractor.extract_from_auto_capture(record, source_doc="auto:6")
         cooccur = [
-            t for t in triples
+            t
+            for t in triples
             if t.relation_type == RelationType.RELATED_TO
             and t.subject_type == EntityType.TECHNOLOGY
             and t.object_type == EntityType.TECHNOLOGY
@@ -725,18 +809,18 @@ class TestParseMultilineJson:
     def test_parse_pretty_printed(self, tmp_dir):
         f = tmp_dir / "test.jsonl"
         f.write_text(
-            '{\n'
+            "{\n"
             '  "type": "auto_capture",\n'
-            '  "project": "myapp"\n'
-            '}\n'
-            '{\n'
+            '  "project": "myproject"\n'
+            "}\n"
+            "{\n"
             '  "type": "auto_capture",\n'
             '  "project": "fabrik"\n'
-            '}\n'
+            "}\n"
         )
         records = _parse_multiline_json(f)
         assert len(records) == 2
-        assert records[0]["project"] == "myapp"
+        assert records[0]["project"] == "myproject"
         assert records[1]["project"] == "fabrik"
 
     def test_parse_empty_file(self, tmp_dir):
@@ -747,11 +831,7 @@ class TestParseMultilineJson:
 
     def test_parse_mixed_valid_invalid(self, tmp_dir):
         f = tmp_dir / "mixed.jsonl"
-        f.write_text(
-            '{"type": "auto_capture"}\n'
-            'not json\n'
-            '{"type": "manual"}\n'
-        )
+        f.write_text('{"type": "auto_capture"}\n' "not json\n" '{"type": "manual"}\n')
         records = _parse_multiline_json(f)
         assert len(records) == 2
 
@@ -783,11 +863,13 @@ class TestPipelineJsonlProcessing:
         engine = GraphEngine(data_dir=graph_dir)
 
         from src.config import settings
+
         original_path = settings.datalake_path
         settings.datalake_path = tmp_dir
 
         try:
             import asyncio
+
             pipeline = ExtractionPipeline(engine=engine, use_llm=False)
             stats = asyncio.run(pipeline.build(force=True))
             assert stats["files_processed"] >= 1
@@ -816,11 +898,13 @@ class TestPipelineJsonlProcessing:
         engine = GraphEngine(data_dir=graph_dir)
 
         from src.config import settings
+
         original_path = settings.datalake_path
         settings.datalake_path = tmp_dir
 
         try:
             import asyncio
+
             pipeline = ExtractionPipeline(engine=engine, use_llm=False)
             stats = asyncio.run(pipeline.build(force=True))
             assert stats["files_processed"] >= 1
@@ -837,14 +921,14 @@ class TestPipelineJsonlProcessing:
             {
                 "type": "auto_capture",
                 "tool": "Edit",
-                "project": "myapp",
+                "project": "myproject",
                 "file_modified": "/home/user/project/src/api.py",
                 "description": "Edit: Added FastAPI endpoint",
             },
             {
                 "type": "auto_capture",
                 "tool": "Write",
-                "project": "myapp",
+                "project": "myproject",
                 "file_modified": "/home/user/project/src/models.ts",
                 "description": "Write: new Angular component",
             },
@@ -864,11 +948,13 @@ class TestPipelineJsonlProcessing:
         engine = GraphEngine(data_dir=graph_dir)
 
         from src.config import settings
+
         original_path = settings.datalake_path
         settings.datalake_path = tmp_dir
 
         try:
             import asyncio
+
             pipeline = ExtractionPipeline(engine=engine, use_llm=False)
             stats = asyncio.run(pipeline.build(force=True))
             assert stats["files_processed"] >= 1
@@ -876,8 +962,10 @@ class TestPipelineJsonlProcessing:
             assert stats["errors"] == 0
 
             # Verify technologies were extracted
-            assert engine.find_entity_by_name("python") is not None or \
-                   engine.find_entity_by_name("fastapi") is not None
+            assert (
+                engine.find_entity_by_name("python") is not None
+                or engine.find_entity_by_name("fastapi") is not None
+            )
         finally:
             settings.datalake_path = original_path
 
@@ -908,11 +996,13 @@ class TestPipelineJsonlProcessing:
         engine = GraphEngine(data_dir=graph_dir)
 
         from src.config import settings
+
         original_path = settings.datalake_path
         settings.datalake_path = tmp_dir
 
         try:
             import asyncio
+
             pipeline = ExtractionPipeline(engine=engine, use_llm=False)
             stats = asyncio.run(pipeline.build(force=True))
             assert stats["files_processed"] >= 1
@@ -1116,7 +1206,7 @@ class TestHeuristicReasoningBoost:
         record = {
             "type": "enriched_capture",
             "tool": "Edit",
-            "project": "myapp",
+            "project": "myproject",
             "file_modified": "/home/user/project/src/main.py",
             "description": "Edit: old -> new",
             "reasoning": "Using retry with backoff pattern to handle connection timeouts in the API layer",
@@ -1133,7 +1223,7 @@ class TestHeuristicReasoningBoost:
         record = {
             "type": "enriched_capture",
             "tool": "Edit",
-            "project": "myapp",
+            "project": "myproject",
             "file_modified": "/home/user/project/src/main.py",
             "description": "Edit: old -> new",
             "enrichment_confidence": "medium",
@@ -1141,7 +1231,9 @@ class TestHeuristicReasoningBoost:
         triples = extractor.extract_from_auto_capture(record, source_doc="enriched:2")
 
         for t in triples:
-            assert t.confidence >= 0.55, f"Triple {t.subject_name} has low confidence {t.confidence}"
+            assert (
+                t.confidence >= 0.55
+            ), f"Triple {t.subject_name} has low confidence {t.confidence}"
 
     def test_no_boost_without_enrichment(self, extractor):
         """Test that non-enriched records keep low confidence."""
@@ -1167,7 +1259,9 @@ class TestHeuristicReasoningBoost:
             "description": "Edit: updated config",
         }
         triples_basic = extractor.extract_from_auto_capture(record_basic, source_doc="test:b")
-        techs_basic = {t.subject_name for t in triples_basic if t.subject_type == EntityType.TECHNOLOGY}
+        techs_basic = {
+            t.subject_name for t in triples_basic if t.subject_type == EntityType.TECHNOLOGY
+        }
 
         # With reasoning mentioning FastAPI and Pydantic
         record_enriched = {
@@ -1180,7 +1274,9 @@ class TestHeuristicReasoningBoost:
             "enrichment_confidence": "high",
         }
         triples_enriched = extractor.extract_from_auto_capture(record_enriched, source_doc="test:e")
-        techs_enriched = {t.subject_name for t in triples_enriched if t.subject_type == EntityType.TECHNOLOGY}
+        techs_enriched = {
+            t.subject_name for t in triples_enriched if t.subject_type == EntityType.TECHNOLOGY
+        }
 
         # Enriched should find more technologies from reasoning
         assert "fastapi" in techs_enriched
@@ -1215,7 +1311,7 @@ class TestPipelineEnrichedCaptures:
             {
                 "type": "enriched_capture",
                 "tool": "Edit",
-                "project": "myapp",
+                "project": "myproject",
                 "file_modified": "/home/user/project/src/api.py",
                 "description": "Edit: Added FastAPI endpoint",
                 "reasoning": "Adding a new REST endpoint with Pydantic validation for user registration",
@@ -1234,11 +1330,13 @@ class TestPipelineEnrichedCaptures:
         engine = GraphEngine(data_dir=graph_dir)
 
         from src.config import settings
+
         original_path = settings.datalake_path
         settings.datalake_path = tmp_dir
 
         try:
             import asyncio
+
             pipeline = ExtractionPipeline(engine=engine, use_llm=False)
             stats = asyncio.run(pipeline.build(force=True))
             assert stats["files_processed"] >= 1
@@ -1277,6 +1375,7 @@ class TestPipelineEnrichedCaptures:
         engine = GraphEngine(data_dir=graph_dir)
 
         from src.config import settings
+
         original_path = settings.datalake_path
         settings.datalake_path = tmp_dir
 
@@ -1330,15 +1429,17 @@ class TestPipelineWithLLM:
         import asyncio
 
         llm_response = LLMResponse(
-            content=json.dumps({
-                "entities": [
-                    {"name": "FastAPI", "type": "technology"},
-                    {"name": "REST", "type": "concept"},
-                ],
-                "relations": [
-                    {"source": "REST", "target": "FastAPI", "type": "depends_on"},
-                ],
-            }),
+            content=json.dumps(
+                {
+                    "entities": [
+                        {"name": "FastAPI", "type": "technology"},
+                        {"name": "REST", "type": "concept"},
+                    ],
+                    "relations": [
+                        {"source": "REST", "target": "FastAPI", "type": "depends_on"},
+                    ],
+                }
+            ),
             model="qwen2.5-coder:7b",
             tokens_used=100,
             latency_ms=2000.0,
@@ -1349,6 +1450,7 @@ class TestPipelineWithLLM:
             engine = GraphEngine(data_dir=graph_dir)
 
             from src.config import settings
+
             original_path = settings.datalake_path
             settings.datalake_path = tmp_datalake
 
@@ -1379,12 +1481,15 @@ class TestPipelineWithLLM:
             engine = GraphEngine(data_dir=graph_dir)
 
             from src.config import settings
+
             original_path = settings.datalake_path
             settings.datalake_path = tmp_datalake
 
             try:
-                with patch("src.knowledge.extraction.llm_extractor.LLMClient") as MockExtractor, \
-                     patch("src.knowledge.extraction.pipeline.LLMClient") as MockPipeline:
+                with (
+                    patch("src.knowledge.extraction.llm_extractor.LLMClient") as MockExtractor,
+                    patch("src.knowledge.extraction.pipeline.LLMClient") as MockPipeline,
+                ):
                     mock_instance = AsyncMock()
                     mock_instance.health_check = AsyncMock(return_value=False)
                     mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
@@ -1408,10 +1513,12 @@ class TestPipelineWithLLM:
         import asyncio
 
         llm_response = LLMResponse(
-            content=json.dumps({
-                "entities": [{"name": "X", "type": "concept"}],
-                "relations": [],
-            }),
+            content=json.dumps(
+                {
+                    "entities": [{"name": "X", "type": "concept"}],
+                    "relations": [],
+                }
+            ),
             model="qwen2.5-coder:7b",
             tokens_used=50,
             latency_ms=1000.0,
@@ -1422,6 +1529,7 @@ class TestPipelineWithLLM:
             engine = GraphEngine(data_dir=graph_dir)
 
             from src.config import settings
+
             original_path = settings.datalake_path
             settings.datalake_path = tmp_datalake
 
@@ -1510,17 +1618,27 @@ class TestExtractReasoning:
         output_dir = tmp_dir / "enriched"
 
         import subprocess
+
         result = subprocess.run(
             [
-                "python3", str(Path(__file__).resolve().parent.parent / "scripts" / "extract_reasoning.py"),
-                "--transcript-path", str(tf),
-                "--tool-use-id", tool_use_id,
-                "--timestamp", "2026-02-06T10:00:00+01:00",
-                "--tool", "Edit",
-                "--project", "test-project",
-                "--file-modified", "/app/src/main.py",
-                "--description", "Edit: added error handling",
-                "--output-dir", str(output_dir),
+                "python3",
+                "scripts/extract_reasoning.py",
+                "--transcript-path",
+                str(tf),
+                "--tool-use-id",
+                tool_use_id,
+                "--timestamp",
+                "2026-02-06T10:00:00+01:00",
+                "--tool",
+                "Edit",
+                "--project",
+                "test-project",
+                "--file-modified",
+                "/app/src/main.py",
+                "--description",
+                "Edit: added error handling",
+                "--output-dir",
+                str(output_dir),
             ],
             capture_output=True,
             text=True,
@@ -1544,17 +1662,27 @@ class TestExtractReasoning:
     def test_main_silent_on_missing_transcript(self, tmp_dir):
         """Test that script exits 0 when transcript doesn't exist."""
         import subprocess
+
         result = subprocess.run(
             [
-                "python3", str(Path(__file__).resolve().parent.parent / "scripts" / "extract_reasoning.py"),
-                "--transcript-path", "/nonexistent/path.jsonl",
-                "--tool-use-id", "toolu_fake",
-                "--timestamp", "2026-02-06T10:00:00+01:00",
-                "--tool", "Edit",
-                "--project", "test",
-                "--file-modified", "/app/main.py",
-                "--description", "Edit: test",
-                "--output-dir", str(tmp_dir / "out"),
+                "python3",
+                "scripts/extract_reasoning.py",
+                "--transcript-path",
+                "/nonexistent/path.jsonl",
+                "--tool-use-id",
+                "toolu_fake",
+                "--timestamp",
+                "2026-02-06T10:00:00+01:00",
+                "--tool",
+                "Edit",
+                "--project",
+                "test",
+                "--file-modified",
+                "/app/main.py",
+                "--description",
+                "Edit: test",
+                "--output-dir",
+                str(tmp_dir / "out"),
             ],
             capture_output=True,
             text=True,
@@ -1660,7 +1788,9 @@ class TestTranscriptExtractor:
 
         assert len(triples) > 0
         for t in triples:
-            assert t.confidence == 0.65, f"Triple {t.subject_name}->{t.object_name} has confidence {t.confidence}, expected 0.65"
+            assert (
+                t.confidence == 0.65
+            ), f"Triple {t.subject_name}->{t.object_name} has confidence {t.confidence}, expected 0.65"
 
     def test_empty_transcript(self, tmp_dir):
         """Empty file -> []."""
@@ -1697,8 +1827,8 @@ class TestTranscriptExtractor:
         tech_names = {t.subject_name for t in triples if t.subject_type == EntityType.TECHNOLOGY}
         assert "docker" in tech_names or "kubernetes" in tech_names
 
-    def test_project_filter(self, tmp_dir):
-        """scan_all_transcripts with project_filter only processes matching dirs."""
+    def test_scans_all_subdirectories(self, tmp_dir):
+        """scan_all_transcripts processes all subdirs containing JSONL files."""
         from src.knowledge.extraction.transcript_extractor import TranscriptExtractor
 
         thinking_text = (
@@ -1707,23 +1837,22 @@ class TestTranscriptExtractor:
             "when navigating between routes in the single-page application architecture."
         )
 
-        # Create matching dir with transcript
-        matching_dir = tmp_dir / "myorg-project"
-        matching_dir.mkdir()
-        t1 = matching_dir / "session.jsonl"
+        # Create two project dirs with transcripts
+        proj1 = tmp_dir / "project-alpha"
+        proj1.mkdir()
+        t1 = proj1 / "session.jsonl"
         t1.write_text(self._make_transcript_line(thinking_text) + "\n")
 
-        # Create non-matching dir with transcript (should be ignored)
-        other_dir = tmp_dir / "other-project"
-        other_dir.mkdir()
-        t2 = other_dir / "session.jsonl"
+        proj2 = tmp_dir / "project-beta"
+        proj2.mkdir()
+        t2 = proj2 / "session.jsonl"
         t2.write_text(self._make_transcript_line(thinking_text) + "\n")
 
         extractor = TranscriptExtractor()
-        triples, stats = extractor.scan_all_transcripts(tmp_dir, project_filter="myorg")
+        triples, stats = extractor.scan_all_transcripts(tmp_dir)
 
         assert len(triples) > 0
-        assert stats["transcripts_scanned"] == 1
+        assert stats["transcripts_scanned"] == 2
 
     def test_scan_stats(self, tmp_dir):
         """Stats fields are correct: found=2, processed=1 for one long + one short thinking block."""
@@ -1816,15 +1945,15 @@ class TestPipelineWithTranscripts:
 
         # Create transcripts dir with project subdir
         transcripts_dir = tmp_dir / "transcripts"
-        quantum_proj = transcripts_dir / "-home-user-projects-myapp"
-        quantum_proj.mkdir(parents=True)
+        project_dir = transcripts_dir / "-home-user-projects-myproject"
+        project_dir.mkdir(parents=True)
 
         thinking_text = (
             "I need to configure the FastAPI application with a PostgreSQL database connection. "
             "The user wants a REST endpoint that queries the database and returns results with "
             "proper error handling and validation using Pydantic models for input and output."
         )
-        transcript_file = quantum_proj / "session.jsonl"
+        transcript_file = project_dir / "session.jsonl"
         transcript_file.write_text(self._make_transcript_line(thinking_text) + "\n")
 
         graph_dir = tmp_dir / "graphdb"
@@ -1865,15 +1994,15 @@ class TestPipelineWithTranscripts:
         datalake.mkdir()
 
         transcripts_dir = tmp_dir / "transcripts"
-        quantum_proj = transcripts_dir / "-home-user-projects-test"
-        quantum_proj.mkdir(parents=True)
+        project_dir = transcripts_dir / "-home-user-projects-test"
+        project_dir.mkdir(parents=True)
 
         thinking_text = (
             "We need to implement the Docker container orchestration with Kubernetes. "
             "The deployment requires proper health checks, resource limits, and horizontal "
             "pod autoscaling based on CPU and memory utilization metrics from Prometheus."
         )
-        transcript_file = quantum_proj / "session.jsonl"
+        transcript_file = project_dir / "session.jsonl"
         transcript_file.write_text(self._make_transcript_line(thinking_text) + "\n")
 
         graph_dir = tmp_dir / "graphdb"
@@ -1890,6 +2019,7 @@ class TestPipelineWithTranscripts:
             assert stats["transcript_triples_extracted"] > 0
             # Verify the count matches what TranscriptExtractor would produce
             from src.knowledge.extraction.transcript_extractor import TranscriptExtractor
+
             extractor = TranscriptExtractor()
             expected_triples = extractor.extract_from_transcript(transcript_file)
             assert stats["transcript_triples_extracted"] == len(expected_triples)
@@ -1900,15 +2030,15 @@ class TestPipelineWithTranscripts:
         datalake.mkdir()
 
         transcripts_dir = tmp_dir / "transcripts"
-        quantum_proj = transcripts_dir / "-home-user-projects-incremental"
-        quantum_proj.mkdir(parents=True)
+        project_dir = transcripts_dir / "-home-user-projects-incremental"
+        project_dir.mkdir(parents=True)
 
         thinking_text = (
             "I need to set up FastAPI with PostgreSQL for the backend service. "
             "The connection pooling strategy will use SQLAlchemy async engine with proper "
             "timeout configuration and retry with exponential backoff for transient failures."
         )
-        transcript_file = quantum_proj / "session.jsonl"
+        transcript_file = project_dir / "session.jsonl"
         transcript_file.write_text(self._make_transcript_line(thinking_text) + "\n")
 
         graph_dir = tmp_dir / "graphdb"
@@ -1938,6 +2068,7 @@ class TestGraphCompletion:
     def _add_chain(self, engine, a_name, b_name, c_name, relation_type):
         """Helper: add A->B->C chain of given relation_type."""
         from src.knowledge.graph_schema import Entity, Relation, make_entity_id
+
         a_id = make_entity_id("technology", a_name)
         b_id = make_entity_id("technology", b_name)
         c_id = make_entity_id("technology", c_name)
@@ -1946,22 +2077,32 @@ class TestGraphCompletion:
         engine.add_entity(Entity(id=b_id, name=b_name, entity_type=EntityType.TECHNOLOGY))
         engine.add_entity(Entity(id=c_id, name=c_name, entity_type=EntityType.TECHNOLOGY))
 
-        engine.add_relation(Relation(
-            source_id=a_id, target_id=b_id,
-            relation_type=relation_type, weight=0.7,
-            source_docs=["test:1"],
-        ))
-        engine.add_relation(Relation(
-            source_id=b_id, target_id=c_id,
-            relation_type=relation_type, weight=0.6,
-            source_docs=["test:2"],
-        ))
+        engine.add_relation(
+            Relation(
+                source_id=a_id,
+                target_id=b_id,
+                relation_type=relation_type,
+                weight=0.7,
+                source_docs=["test:1"],
+            )
+        )
+        engine.add_relation(
+            Relation(
+                source_id=b_id,
+                target_id=c_id,
+                relation_type=relation_type,
+                weight=0.6,
+                source_docs=["test:2"],
+            )
+        )
         return a_id, b_id, c_id
 
     def test_complete_depends_on(self, tmp_dir):
         """A->B->C with DEPENDS_ON -> infers A->C."""
         engine = GraphEngine(data_dir=tmp_dir / "graphdb")
-        a_id, _, c_id = self._add_chain(engine, "fastapi", "starlette", "uvicorn", RelationType.DEPENDS_ON)
+        a_id, _, c_id = self._add_chain(
+            engine, "fastapi", "starlette", "uvicorn", RelationType.DEPENDS_ON
+        )
 
         stats = engine.complete()
 
@@ -1974,7 +2115,9 @@ class TestGraphCompletion:
     def test_complete_part_of(self, tmp_dir):
         """A->B->C with PART_OF -> infers A->C."""
         engine = GraphEngine(data_dir=tmp_dir / "graphdb")
-        a_id, _, c_id = self._add_chain(engine, "router", "api-layer", "backend", RelationType.PART_OF)
+        a_id, _, c_id = self._add_chain(
+            engine, "router", "api-layer", "backend", RelationType.PART_OF
+        )
 
         stats = engine.complete()
 
@@ -1985,16 +2128,21 @@ class TestGraphCompletion:
 
     def test_complete_no_duplicate(self, tmp_dir):
         """If A->C already exists, complete() does NOT create a duplicate or modify it."""
-        from src.knowledge.graph_schema import Entity, Relation, make_entity_id
+        from src.knowledge.graph_schema import Relation
+
         engine = GraphEngine(data_dir=tmp_dir / "graphdb")
         a_id, _, c_id = self._add_chain(engine, "x", "y", "z", RelationType.DEPENDS_ON)
 
         # Add direct A->C edge with weight=0.8
-        engine.add_relation(Relation(
-            source_id=a_id, target_id=c_id,
-            relation_type=RelationType.DEPENDS_ON, weight=0.8,
-            source_docs=["direct:1"],
-        ))
+        engine.add_relation(
+            Relation(
+                source_id=a_id,
+                target_id=c_id,
+                relation_type=RelationType.DEPENDS_ON,
+                weight=0.8,
+                source_docs=["direct:1"],
+            )
+        )
         original_weight = engine._graph.edges[a_id, c_id]["weight"]
 
         stats = engine.complete()
@@ -2006,6 +2154,7 @@ class TestGraphCompletion:
     def test_complete_different_types_no_inference(self, tmp_dir):
         """A depends_on B, B part_of C -> NO inference (different relation types)."""
         from src.knowledge.graph_schema import Entity, Relation, make_entity_id
+
         engine = GraphEngine(data_dir=tmp_dir / "graphdb")
 
         a_id = make_entity_id("technology", "svc-a")
@@ -2016,14 +2165,22 @@ class TestGraphCompletion:
         engine.add_entity(Entity(id=b_id, name="svc-b", entity_type=EntityType.TECHNOLOGY))
         engine.add_entity(Entity(id=c_id, name="svc-c", entity_type=EntityType.TECHNOLOGY))
 
-        engine.add_relation(Relation(
-            source_id=a_id, target_id=b_id,
-            relation_type=RelationType.DEPENDS_ON, weight=0.7,
-        ))
-        engine.add_relation(Relation(
-            source_id=b_id, target_id=c_id,
-            relation_type=RelationType.PART_OF, weight=0.6,
-        ))
+        engine.add_relation(
+            Relation(
+                source_id=a_id,
+                target_id=b_id,
+                relation_type=RelationType.DEPENDS_ON,
+                weight=0.7,
+            )
+        )
+        engine.add_relation(
+            Relation(
+                source_id=b_id,
+                target_id=c_id,
+                relation_type=RelationType.PART_OF,
+                weight=0.6,
+            )
+        )
 
         stats = engine.complete()
 
@@ -2080,6 +2237,7 @@ class TestGraphCompletion:
         """Pipeline build() runs completion, stats include inferred_triples."""
         import asyncio
         from unittest.mock import patch
+
         from src.knowledge.extraction.pipeline import ExtractionPipeline
 
         # Create datalake with training pair that creates a DEPENDS_ON chain

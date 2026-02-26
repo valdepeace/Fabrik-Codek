@@ -1,7 +1,7 @@
 """Tests for Competence Model dataclasses and scoring functions."""
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -26,7 +26,6 @@ from src.core.competence_model import (
     CompetenceMap,
     _classify_level,
     _competence_cache,
-    _EXT_TO_TOPIC,
     compute_competence_score,
     compute_entity_density,
     compute_entry_score,
@@ -163,18 +162,22 @@ class TestCompetenceMap:
         assert cmap.get_entry("anything") is None
 
     def test_get_level_lookup(self):
-        cmap = CompetenceMap(topics=[
-            CompetenceEntry(topic="python", score=0.9, level="Expert"),
-            CompetenceEntry(topic="rust", score=0.3, level="Novice"),
-        ])
+        cmap = CompetenceMap(
+            topics=[
+                CompetenceEntry(topic="python", score=0.9, level="Expert"),
+                CompetenceEntry(topic="rust", score=0.3, level="Novice"),
+            ]
+        )
         assert cmap.get_level("python") == "Expert"
         assert cmap.get_level("rust") == "Novice"
         assert cmap.get_level("go") == "Unknown"
 
     def test_get_score_lookup(self):
-        cmap = CompetenceMap(topics=[
-            CompetenceEntry(topic="docker", score=0.55, level="Competent"),
-        ])
+        cmap = CompetenceMap(
+            topics=[
+                CompetenceEntry(topic="docker", score=0.55, level="Competent"),
+            ]
+        )
         assert cmap.get_score("docker") == 0.55
         assert cmap.get_score("kubernetes") == 0.0
 
@@ -187,22 +190,26 @@ class TestCompetenceMap:
         assert result.score == 0.42
 
     def test_experts_filter(self):
-        cmap = CompetenceMap(topics=[
-            CompetenceEntry(topic="python", score=0.95, level="Expert"),
-            CompetenceEntry(topic="docker", score=0.5, level="Competent"),
-            CompetenceEntry(topic="postgresql", score=0.85, level="Expert"),
-            CompetenceEntry(topic="rust", score=0.2, level="Novice"),
-        ])
+        cmap = CompetenceMap(
+            topics=[
+                CompetenceEntry(topic="python", score=0.95, level="Expert"),
+                CompetenceEntry(topic="docker", score=0.5, level="Competent"),
+                CompetenceEntry(topic="postgresql", score=0.85, level="Expert"),
+                CompetenceEntry(topic="rust", score=0.2, level="Novice"),
+            ]
+        )
         experts = cmap.experts()
         assert len(experts) == 2
         expert_topics = {e.topic for e in experts}
         assert expert_topics == {"python", "postgresql"}
 
     def test_experts_empty_when_no_experts(self):
-        cmap = CompetenceMap(topics=[
-            CompetenceEntry(topic="go", score=0.5, level="Competent"),
-            CompetenceEntry(topic="rust", score=0.2, level="Novice"),
-        ])
+        cmap = CompetenceMap(
+            topics=[
+                CompetenceEntry(topic="go", score=0.5, level="Competent"),
+                CompetenceEntry(topic="rust", score=0.2, level="Novice"),
+            ]
+        )
         assert cmap.experts() == []
 
     def test_serialization_roundtrip(self):
@@ -243,13 +250,15 @@ class TestCompetenceMap:
         assert cmap.total_topics == 0
 
     def test_system_prompt_fragment_with_experts_and_competent(self):
-        cmap = CompetenceMap(topics=[
-            CompetenceEntry(topic="python", level="Expert"),
-            CompetenceEntry(topic="postgresql", level="Expert"),
-            CompetenceEntry(topic="docker", level="Competent"),
-            CompetenceEntry(topic="terraform", level="Competent"),
-            CompetenceEntry(topic="rust", level="Novice"),
-        ])
+        cmap = CompetenceMap(
+            topics=[
+                CompetenceEntry(topic="python", level="Expert"),
+                CompetenceEntry(topic="postgresql", level="Expert"),
+                CompetenceEntry(topic="docker", level="Competent"),
+                CompetenceEntry(topic="terraform", level="Competent"),
+                CompetenceEntry(topic="rust", level="Novice"),
+            ]
+        )
         fragment = cmap.to_system_prompt_fragment()
         assert "Expert in: python, postgresql" in fragment
         assert "Competent in: docker, terraform" in fragment
@@ -257,30 +266,36 @@ class TestCompetenceMap:
         assert fragment.endswith(".")
 
     def test_system_prompt_fragment_experts_only(self):
-        cmap = CompetenceMap(topics=[
-            CompetenceEntry(topic="python", level="Expert"),
-            CompetenceEntry(topic="rust", level="Novice"),
-        ])
+        cmap = CompetenceMap(
+            topics=[
+                CompetenceEntry(topic="python", level="Expert"),
+                CompetenceEntry(topic="rust", level="Novice"),
+            ]
+        )
         fragment = cmap.to_system_prompt_fragment()
         assert "Expert in: python" in fragment
         assert "Competent" not in fragment
         assert fragment.endswith(".")
 
     def test_system_prompt_fragment_competent_only(self):
-        cmap = CompetenceMap(topics=[
-            CompetenceEntry(topic="docker", level="Competent"),
-            CompetenceEntry(topic="go", level="Novice"),
-        ])
+        cmap = CompetenceMap(
+            topics=[
+                CompetenceEntry(topic="docker", level="Competent"),
+                CompetenceEntry(topic="go", level="Novice"),
+            ]
+        )
         fragment = cmap.to_system_prompt_fragment()
         assert "Competent in: docker" in fragment
         assert "Expert" not in fragment
         assert fragment.endswith(".")
 
     def test_system_prompt_fragment_empty_when_no_expert_or_competent(self):
-        cmap = CompetenceMap(topics=[
-            CompetenceEntry(topic="rust", level="Novice"),
-            CompetenceEntry(topic="go", level="Unknown"),
-        ])
+        cmap = CompetenceMap(
+            topics=[
+                CompetenceEntry(topic="rust", level="Novice"),
+                CompetenceEntry(topic="go", level="Unknown"),
+            ]
+        )
         assert cmap.to_system_prompt_fragment() == ""
 
     def test_system_prompt_fragment_empty_map(self):
@@ -288,14 +303,8 @@ class TestCompetenceMap:
         assert cmap.to_system_prompt_fragment() == ""
 
     def test_system_prompt_fragment_max_five_each(self):
-        experts = [
-            CompetenceEntry(topic=f"expert_{i}", level="Expert")
-            for i in range(8)
-        ]
-        competents = [
-            CompetenceEntry(topic=f"comp_{i}", level="Competent")
-            for i in range(8)
-        ]
+        experts = [CompetenceEntry(topic=f"expert_{i}", level="Expert") for i in range(8)]
+        competents = [CompetenceEntry(topic=f"comp_{i}", level="Competent") for i in range(8)]
         cmap = CompetenceMap(topics=experts + competents)
         fragment = cmap.to_system_prompt_fragment()
         # Count topics listed after "Expert in:"
@@ -380,31 +389,31 @@ class TestRecencyWeight:
         assert compute_recency_weight("not-a-date") == 0.0
 
     def test_now_returns_approximately_one(self):
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         score = compute_recency_weight(now.isoformat(), reference_time=now)
         assert score >= 0.99
 
     def test_one_half_life_returns_half(self):
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         past = now - timedelta(days=30)
         score = compute_recency_weight(past.isoformat(), reference_time=now)
         assert 0.49 <= score <= 0.51  # ~0.5
 
     def test_two_half_lives_returns_quarter(self):
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         past = now - timedelta(days=60)
         score = compute_recency_weight(past.isoformat(), reference_time=now)
         assert 0.24 <= score <= 0.26  # ~0.25
 
     def test_future_timestamp_returns_one(self):
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         future = now + timedelta(days=10)
         score = compute_recency_weight(future.isoformat(), reference_time=now)
         assert score == 1.0
 
     def test_naive_vs_aware_compatible(self):
         """Naive last_activity and aware reference_time should work."""
-        ref = datetime(2026, 2, 20, 12, 0, 0, tzinfo=timezone.utc)
+        ref = datetime(2026, 2, 20, 12, 0, 0, tzinfo=UTC)
         naive_iso = "2026-02-20T12:00:00"
         score = compute_recency_weight(naive_iso, reference_time=ref)
         assert score >= 0.99
@@ -421,14 +430,17 @@ class TestComputeCompetenceScore:
     """Test the composite compute_competence_score."""
 
     def _ref(self) -> datetime:
-        return datetime(2026, 2, 20, 12, 0, 0, tzinfo=timezone.utc)
+        return datetime(2026, 2, 20, 12, 0, 0, tzinfo=UTC)
 
     def test_all_signals(self):
         """With all signals and no outcome, uses WEIGHTS_ALL_NO_OUTCOME."""
         ref = self._ref()
         last = ref.isoformat()
         final, entry_s, density_s, recency_s = compute_competence_score(
-            entries=100, edge_count=100, last_activity_iso=last, reference_time=ref,
+            entries=100,
+            edge_count=100,
+            last_activity_iso=last,
+            reference_time=ref,
         )
         assert entry_s == 1.0
         assert density_s == 1.0
@@ -445,7 +457,10 @@ class TestComputeCompetenceScore:
         ref = self._ref()
         last = ref.isoformat()
         final, entry_s, density_s, recency_s = compute_competence_score(
-            entries=50, edge_count=None, last_activity_iso=last, reference_time=ref,
+            entries=50,
+            edge_count=None,
+            last_activity_iso=last,
+            reference_time=ref,
         )
         assert density_s == 0.0
         assert recency_s >= 0.99
@@ -459,7 +474,10 @@ class TestComputeCompetenceScore:
         """Empty last_activity -> WEIGHTS_NO_RECENCY_NO_OUTCOME, recency_s=0.0."""
         ref = self._ref()
         final, entry_s, density_s, recency_s = compute_competence_score(
-            entries=50, edge_count=50, last_activity_iso="", reference_time=ref,
+            entries=50,
+            edge_count=50,
+            last_activity_iso="",
+            reference_time=ref,
         )
         assert recency_s == 0.0
         assert density_s == 0.5
@@ -473,7 +491,10 @@ class TestComputeCompetenceScore:
         """No graph + no recency -> WEIGHTS_ENTRY_ONLY_NO_OUTCOME, max possible = 0.8."""
         ref = self._ref()
         final, entry_s, density_s, recency_s = compute_competence_score(
-            entries=500, edge_count=None, last_activity_iso="", reference_time=ref,
+            entries=500,
+            edge_count=None,
+            last_activity_iso="",
+            reference_time=ref,
         )
         assert entry_s == 1.0
         assert density_s == 0.0
@@ -484,7 +505,10 @@ class TestComputeCompetenceScore:
         """Zero entries, no graph, no recency -> 0.0."""
         ref = self._ref()
         final, entry_s, density_s, recency_s = compute_competence_score(
-            entries=0, edge_count=None, last_activity_iso="", reference_time=ref,
+            entries=0,
+            edge_count=None,
+            last_activity_iso="",
+            reference_time=ref,
         )
         assert final == 0.0
         assert entry_s == 0.0
@@ -496,7 +520,10 @@ class TestComputeCompetenceScore:
         ref = self._ref()
         past = (ref - timedelta(days=15)).isoformat()
         final, _, _, _ = compute_competence_score(
-            entries=25, edge_count=30, last_activity_iso=past, reference_time=ref,
+            entries=25,
+            edge_count=30,
+            last_activity_iso=past,
+            reference_time=ref,
         )
         assert 0.0 < final < 1.0
 
@@ -721,13 +748,18 @@ class TestCompetenceBuilderGathering:
         assert "angular" in matched
 
     def test_extract_date_from_filename_with_prefix(self):
-        assert CompetenceBuilder._extract_date_from_filename("2026-01-15_postgresql_batch") == "2026-01-15"
+        assert (
+            CompetenceBuilder._extract_date_from_filename("2026-01-15_postgresql_batch")
+            == "2026-01-15"
+        )
 
     def test_extract_date_from_filename_without_date(self):
         assert CompetenceBuilder._extract_date_from_filename("postgresql_basics") is None
 
     def test_extract_date_from_filename_embedded_date(self):
-        assert CompetenceBuilder._extract_date_from_filename("data_2025-12-01_export") == "2025-12-01"
+        assert (
+            CompetenceBuilder._extract_date_from_filename("data_2025-12-01_export") == "2025-12-01"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -764,7 +796,7 @@ def build_datalake(tmp_path: Path) -> Path:
 
     # Recent auto-capture tagged "postgresql"
     ac_dir = dl / "01-raw" / "code-changes"
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     _write_jsonl(
         ac_dir / "2026-02-20_auto-captures.jsonl",
         [
@@ -1017,13 +1049,16 @@ class TestSystemPromptIntegration:
     def test_profile_prompt_plus_competence_fragment(self):
         """Combined profile prompt and competence fragment."""
         from src.core.personal_profile import PersonalProfile
+
         profile = PersonalProfile(domain="software_development", domain_confidence=0.9)
         profile_system = profile.to_system_prompt()
 
-        cmap = CompetenceMap(topics=[
-            CompetenceEntry(topic="python", score=0.9, level="Expert"),
-            CompetenceEntry(topic="docker", score=0.5, level="Competent"),
-        ])
+        cmap = CompetenceMap(
+            topics=[
+                CompetenceEntry(topic="python", score=0.9, level="Expert"),
+                CompetenceEntry(topic="docker", score=0.5, level="Competent"),
+            ]
+        )
         fragment = cmap.to_system_prompt_fragment()
 
         combined = f"{profile_system} {fragment}"
@@ -1034,6 +1069,7 @@ class TestSystemPromptIntegration:
     def test_empty_competence_adds_nothing(self):
         """Empty competence map should not alter the prompt."""
         from src.core.personal_profile import PersonalProfile
+
         profile = PersonalProfile(domain="software_development", domain_confidence=0.9)
         profile_system = profile.to_system_prompt()
 
@@ -1057,15 +1093,18 @@ class TestOutcomeSignal:
     """Test outcome_rate as 4th signal in compute_competence_score."""
 
     def _ref(self) -> datetime:
-        return datetime(2026, 2, 20, 12, 0, 0, tzinfo=timezone.utc)
+        return datetime(2026, 2, 20, 12, 0, 0, tzinfo=UTC)
 
     def test_compute_with_outcome_rate(self):
         """outcome_rate=0.8 produces a valid score using WEIGHTS_ALL."""
         ref = self._ref()
         last = ref.isoformat()
         final, entry_s, density_s, recency_s = compute_competence_score(
-            entries=100, edge_count=100, last_activity_iso=last,
-            reference_time=ref, outcome_rate=0.8,
+            entries=100,
+            edge_count=100,
+            last_activity_iso=last,
+            reference_time=ref,
+            outcome_rate=0.8,
         )
         assert entry_s == 1.0
         assert density_s == 1.0
@@ -1083,8 +1122,11 @@ class TestOutcomeSignal:
         ref = self._ref()
         last = ref.isoformat()
         final, entry_s, density_s, recency_s = compute_competence_score(
-            entries=100, edge_count=100, last_activity_iso=last,
-            reference_time=ref, outcome_rate=None,
+            entries=100,
+            edge_count=100,
+            last_activity_iso=last,
+            reference_time=ref,
+            outcome_rate=None,
         )
         # Should use WEIGHTS_ALL_NO_OUTCOME which is the original WEIGHTS_ALL
         expected = (
@@ -1099,12 +1141,18 @@ class TestOutcomeSignal:
         ref = self._ref()
         last = ref.isoformat()
         final_high, _, _, _ = compute_competence_score(
-            entries=50, edge_count=50, last_activity_iso=last,
-            reference_time=ref, outcome_rate=0.9,
+            entries=50,
+            edge_count=50,
+            last_activity_iso=last,
+            reference_time=ref,
+            outcome_rate=0.9,
         )
         final_low, _, _, _ = compute_competence_score(
-            entries=50, edge_count=50, last_activity_iso=last,
-            reference_time=ref, outcome_rate=0.2,
+            entries=50,
+            edge_count=50,
+            last_activity_iso=last,
+            reference_time=ref,
+            outcome_rate=0.2,
         )
         assert final_high > final_low
 
@@ -1137,8 +1185,11 @@ class TestOutcomeSignal:
         ref = self._ref()
         last = ref.isoformat()
         final, entry_s, _, recency_s = compute_competence_score(
-            entries=50, edge_count=None, last_activity_iso=last,
-            reference_time=ref, outcome_rate=0.7,
+            entries=50,
+            edge_count=None,
+            last_activity_iso=last,
+            reference_time=ref,
+            outcome_rate=0.7,
         )
         expected = (
             WEIGHTS_NO_GRAPH["entry"] * entry_s
@@ -1151,8 +1202,11 @@ class TestOutcomeSignal:
         """Empty recency + outcome_rate uses WEIGHTS_NO_RECENCY."""
         ref = self._ref()
         final, entry_s, density_s, _ = compute_competence_score(
-            entries=50, edge_count=50, last_activity_iso="",
-            reference_time=ref, outcome_rate=0.6,
+            entries=50,
+            edge_count=50,
+            last_activity_iso="",
+            reference_time=ref,
+            outcome_rate=0.6,
         )
         expected = (
             WEIGHTS_NO_RECENCY["entry"] * entry_s
@@ -1165,13 +1219,13 @@ class TestOutcomeSignal:
         """No graph + no recency + outcome_rate uses WEIGHTS_ENTRY_ONLY."""
         ref = self._ref()
         final, entry_s, _, _ = compute_competence_score(
-            entries=100, edge_count=None, last_activity_iso="",
-            reference_time=ref, outcome_rate=0.5,
+            entries=100,
+            edge_count=None,
+            last_activity_iso="",
+            reference_time=ref,
+            outcome_rate=0.5,
         )
-        expected = (
-            WEIGHTS_ENTRY_ONLY["entry"] * entry_s
-            + WEIGHTS_ENTRY_ONLY["outcome"] * 0.5
-        )
+        expected = WEIGHTS_ENTRY_ONLY["entry"] * entry_s + WEIGHTS_ENTRY_ONLY["outcome"] * 0.5
         assert abs(final - expected) < 0.01
 
     def test_outcome_zero_lowers_score(self):
@@ -1180,13 +1234,19 @@ class TestOutcomeSignal:
         last = ref.isoformat()
         # With outcome=0.0, outcome signal contributes 0 but weights are redistributed
         final_with_zero, _, _, _ = compute_competence_score(
-            entries=100, edge_count=100, last_activity_iso=last,
-            reference_time=ref, outcome_rate=0.0,
+            entries=100,
+            edge_count=100,
+            last_activity_iso=last,
+            reference_time=ref,
+            outcome_rate=0.0,
         )
         # Without outcome, uses original weights
         final_without, _, _, _ = compute_competence_score(
-            entries=100, edge_count=100, last_activity_iso=last,
-            reference_time=ref, outcome_rate=None,
+            entries=100,
+            edge_count=100,
+            last_activity_iso=last,
+            reference_time=ref,
+            outcome_rate=None,
         )
         # 0.0 outcome should lower the score compared to no outcome
         # because no-outcome uses original weights which give more to entry/density/recency

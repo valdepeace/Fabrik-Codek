@@ -38,7 +38,7 @@ class StrategyOptimizer:
     Parameters
     ----------
     datalake_path:
-        Root of the datalake directory.
+        Root of the datalake (e.g. ``/media/.../fabrik-codek-datalake``).
         Outcome JSONL files are expected under
         ``datalake_path / "01-raw" / "outcomes" / "*_outcomes.jsonl"``.
     """

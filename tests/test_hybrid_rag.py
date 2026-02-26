@@ -2,12 +2,12 @@
 
 import tempfile
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from src.knowledge.graph_engine import GraphEngine
-from src.knowledge.graph_schema import Entity, EntityType, Relation, RelationType, Triple
+from src.knowledge.graph_schema import EntityType, RelationType, Triple
 from src.knowledge.hybrid_rag import HybridRAGEngine
 
 
@@ -23,38 +23,46 @@ def graph_engine(tmp_dir):
     engine = GraphEngine(data_dir=tmp_dir / "graphdb")
 
     # Add test entities and relations
-    engine.ingest_triple(Triple(
-        subject_name="FastAPI",
-        subject_type=EntityType.TECHNOLOGY,
-        relation_type=RelationType.USES,
-        object_name="Pydantic",
-        object_type=EntityType.TECHNOLOGY,
-        source_doc="doc1",
-    ))
-    engine.ingest_triple(Triple(
-        subject_name="FastAPI",
-        subject_type=EntityType.TECHNOLOGY,
-        relation_type=RelationType.USES,
-        object_name="Starlette",
-        object_type=EntityType.TECHNOLOGY,
-        source_doc="doc2",
-    ))
-    engine.ingest_triple(Triple(
-        subject_name="retry with backoff",
-        subject_type=EntityType.STRATEGY,
-        relation_type=RelationType.FIXES,
-        object_name="connection error",
-        object_type=EntityType.ERROR_TYPE,
-        source_doc="doc3",
-    ))
-    engine.ingest_triple(Triple(
-        subject_name="hexagonal architecture",
-        subject_type=EntityType.PATTERN,
-        relation_type=RelationType.RELATED_TO,
-        object_name="domain-driven design",
-        object_type=EntityType.CONCEPT,
-        source_doc="doc4",
-    ))
+    engine.ingest_triple(
+        Triple(
+            subject_name="FastAPI",
+            subject_type=EntityType.TECHNOLOGY,
+            relation_type=RelationType.USES,
+            object_name="Pydantic",
+            object_type=EntityType.TECHNOLOGY,
+            source_doc="doc1",
+        )
+    )
+    engine.ingest_triple(
+        Triple(
+            subject_name="FastAPI",
+            subject_type=EntityType.TECHNOLOGY,
+            relation_type=RelationType.USES,
+            object_name="Starlette",
+            object_type=EntityType.TECHNOLOGY,
+            source_doc="doc2",
+        )
+    )
+    engine.ingest_triple(
+        Triple(
+            subject_name="retry with backoff",
+            subject_type=EntityType.STRATEGY,
+            relation_type=RelationType.FIXES,
+            object_name="connection error",
+            object_type=EntityType.ERROR_TYPE,
+            source_doc="doc3",
+        )
+    )
+    engine.ingest_triple(
+        Triple(
+            subject_name="hexagonal architecture",
+            subject_type=EntityType.PATTERN,
+            relation_type=RelationType.RELATED_TO,
+            object_name="domain-driven design",
+            object_type=EntityType.CONCEPT,
+            source_doc="doc4",
+        )
+    )
 
     return engine
 
@@ -65,11 +73,28 @@ def mock_rag_engine():
     rag = MagicMock()
     rag._init = AsyncMock()
     rag.close = AsyncMock()
-    rag.retrieve = AsyncMock(return_value=[
-        {"text": "FastAPI is a modern web framework", "source": "file1", "category": "api", "score": 0.9},
-        {"text": "Pydantic provides data validation", "source": "file2", "category": "api", "score": 0.8},
-        {"text": "Use SQLAlchemy for ORM", "source": "file3", "category": "database", "score": 0.7},
-    ])
+    rag.retrieve = AsyncMock(
+        return_value=[
+            {
+                "text": "FastAPI is a modern web framework",
+                "source": "file1",
+                "category": "api",
+                "score": 0.9,
+            },
+            {
+                "text": "Pydantic provides data validation",
+                "source": "file2",
+                "category": "api",
+                "score": 0.8,
+            },
+            {
+                "text": "Use SQLAlchemy for ORM",
+                "source": "file3",
+                "category": "database",
+                "score": 0.7,
+            },
+        ]
+    )
     return rag
 
 
@@ -112,8 +137,20 @@ class TestRRFFusion:
             {"text": "vector only", "source": "f2", "category": "c2", "score": 0.8},
         ]
         graph = [
-            {"text": "shared result from vector", "source": "f1", "category": "c1", "score": 0.7, "origin": "graph"},
-            {"text": "graph only", "source": "f3", "category": "c3", "score": 0.6, "origin": "graph"},
+            {
+                "text": "shared result from vector",
+                "source": "f1",
+                "category": "c1",
+                "score": 0.7,
+                "origin": "graph",
+            },
+            {
+                "text": "graph only",
+                "source": "f3",
+                "category": "c3",
+                "score": 0.6,
+                "origin": "graph",
+            },
         ]
         fused = hybrid._rrf_fusion(vector, graph, limit=5)
 
@@ -140,8 +177,10 @@ class TestRRFFusion:
             rag_engine=mock_rag_engine,
             graph_engine=graph_engine,
         )
-        vector = [{"text": f"result {i}", "source": f"f{i}", "category": "c", "score": 0.5}
-                  for i in range(10)]
+        vector = [
+            {"text": f"result {i}", "source": f"f{i}", "category": "c", "score": 0.5}
+            for i in range(10)
+        ]
         fused = hybrid._rrf_fusion(vector, [], limit=3)
         assert len(fused) == 3
 
@@ -151,21 +190,31 @@ class TestRRFFusion:
             {"text": "vector preferred", "source": "f1", "category": "c1", "score": 0.9},
         ]
         graph = [
-            {"text": "graph preferred", "source": "f2", "category": "c2", "score": 0.9, "origin": "graph"},
+            {
+                "text": "graph preferred",
+                "source": "f2",
+                "category": "c2",
+                "score": 0.9,
+                "origin": "graph",
+            },
         ]
 
         # Vector-heavy weights
         hybrid_v = HybridRAGEngine(
-            rag_engine=mock_rag_engine, graph_engine=graph_engine,
-            vector_weight=0.9, graph_weight=0.1,
+            rag_engine=mock_rag_engine,
+            graph_engine=graph_engine,
+            vector_weight=0.9,
+            graph_weight=0.1,
         )
         fused_v = hybrid_v._rrf_fusion(vector, graph)
         assert fused_v[0]["text"] == "vector preferred"
 
         # Graph-heavy weights
         hybrid_g = HybridRAGEngine(
-            rag_engine=mock_rag_engine, graph_engine=graph_engine,
-            vector_weight=0.1, graph_weight=0.9,
+            rag_engine=mock_rag_engine,
+            graph_engine=graph_engine,
+            vector_weight=0.1,
+            graph_weight=0.9,
         )
         fused_g = hybrid_g._rrf_fusion(vector, graph)
         assert fused_g[0]["text"] == "graph preferred"
@@ -248,7 +297,7 @@ class TestHybridRetrieval:
             graph_engine=graph_engine,
         )
         prompt = await hybrid.query_with_context("How to use FastAPI?")
-        assert "Question:" in prompt
+        assert "Pregunta:" in prompt
         assert "FastAPI" in prompt or "fastapi" in prompt.lower()
 
     @pytest.mark.asyncio
@@ -316,15 +365,30 @@ class TestThreeTierRRF:
         )
 
         vector_results = [
-            {"text": "FastAPI uses Pydantic for validation", "source": "a", "category": "training", "score": 0.9},
+            {
+                "text": "FastAPI uses Pydantic for validation",
+                "source": "a",
+                "category": "training",
+                "score": 0.9,
+            },
         ]
         graph_results = [
-            {"text": "FastAPI uses Pydantic for validation", "source": "a", "category": "training",
-             "score": 0.8, "origin": "graph"},
+            {
+                "text": "FastAPI uses Pydantic for validation",
+                "source": "a",
+                "category": "training",
+                "score": 0.8,
+                "origin": "graph",
+            },
         ]
         fulltext_results = [
-            {"text": "FastAPI uses Pydantic for validation", "source": "a", "category": "training",
-             "score": 1.0, "origin": "fulltext"},
+            {
+                "text": "FastAPI uses Pydantic for validation",
+                "source": "a",
+                "category": "training",
+                "score": 1.0,
+                "origin": "fulltext",
+            },
         ]
 
         fused = engine._rrf_fusion(vector_results, graph_results, fulltext_results, limit=5)
@@ -341,8 +405,13 @@ class TestThreeTierRRF:
         )
 
         fulltext_results = [
-            {"text": "exact error match", "source": "err", "category": "learning",
-             "score": 1.0, "origin": "fulltext"},
+            {
+                "text": "exact error match",
+                "source": "err",
+                "category": "learning",
+                "score": 1.0,
+                "origin": "fulltext",
+            },
         ]
 
         fused = engine._rrf_fusion([], [], fulltext_results, limit=5)
@@ -358,8 +427,13 @@ class TestThreeTierRRF:
         )
 
         fulltext_results = [
-            {"text": "should not appear", "source": "x", "category": "x",
-             "score": 1.0, "origin": "fulltext"},
+            {
+                "text": "should not appear",
+                "source": "x",
+                "category": "x",
+                "score": 1.0,
+                "origin": "fulltext",
+            },
         ]
 
         fused = engine._rrf_fusion([], [], fulltext_results, limit=5)
@@ -380,11 +454,29 @@ class TestThreeTierRRF:
             {"text": "vector only", "source": "b", "category": "c", "score": 0.8},
         ]
         graph = [
-            {"text": "in all three", "source": "a", "category": "c", "score": 0.8, "origin": "graph"},
+            {
+                "text": "in all three",
+                "source": "a",
+                "category": "c",
+                "score": 0.8,
+                "origin": "graph",
+            },
         ]
         fulltext = [
-            {"text": "in all three", "source": "a", "category": "c", "score": 1.0, "origin": "fulltext"},
-            {"text": "fulltext only", "source": "d", "category": "c", "score": 1.0, "origin": "fulltext"},
+            {
+                "text": "in all three",
+                "source": "a",
+                "category": "c",
+                "score": 1.0,
+                "origin": "fulltext",
+            },
+            {
+                "text": "fulltext only",
+                "source": "d",
+                "category": "c",
+                "score": 1.0,
+                "origin": "fulltext",
+            },
         ]
 
         fused = engine._rrf_fusion(vector, graph, fulltext, limit=5)
@@ -409,15 +501,24 @@ class TestHybridRetrieveWithFullText:
     @pytest.mark.asyncio
     async def test_retrieve_with_fulltext_engine(self, graph_engine):
         mock_rag = MagicMock()
-        mock_rag.retrieve = AsyncMock(return_value=[
-            {"text": "vector result", "source": "v", "category": "training", "score": 0.9},
-        ])
+        mock_rag.retrieve = AsyncMock(
+            return_value=[
+                {"text": "vector result", "source": "v", "category": "training", "score": 0.9},
+            ]
+        )
 
         mock_fulltext = AsyncMock()
-        mock_fulltext.search = AsyncMock(return_value=[
-            {"text": "fulltext result", "source": "f", "category": "training",
-             "score": 1.0, "origin": "fulltext"},
-        ])
+        mock_fulltext.search = AsyncMock(
+            return_value=[
+                {
+                    "text": "fulltext result",
+                    "source": "f",
+                    "category": "training",
+                    "score": 1.0,
+                    "origin": "fulltext",
+                },
+            ]
+        )
 
         engine = HybridRAGEngine(
             rag_engine=mock_rag,
@@ -434,9 +535,11 @@ class TestHybridRetrieveWithFullText:
     async def test_retrieve_without_fulltext_engine(self, graph_engine):
         """When no fulltext engine, works as before (vector + graph only)."""
         mock_rag = MagicMock()
-        mock_rag.retrieve = AsyncMock(return_value=[
-            {"text": "vector result", "source": "v", "category": "training", "score": 0.9},
-        ])
+        mock_rag.retrieve = AsyncMock(
+            return_value=[
+                {"text": "vector result", "source": "v", "category": "training", "score": 0.9},
+            ]
+        )
 
         engine = HybridRAGEngine(
             rag_engine=mock_rag,
@@ -450,9 +553,11 @@ class TestHybridRetrieveWithFullText:
     async def test_fulltext_failure_doesnt_break_retrieve(self, graph_engine):
         """If fulltext engine throws, retrieve still returns vector+graph results."""
         mock_rag = MagicMock()
-        mock_rag.retrieve = AsyncMock(return_value=[
-            {"text": "vector result", "source": "v", "category": "training", "score": 0.9},
-        ])
+        mock_rag.retrieve = AsyncMock(
+            return_value=[
+                {"text": "vector result", "source": "v", "category": "training", "score": 0.9},
+            ]
+        )
 
         mock_fulltext = AsyncMock()
         mock_fulltext.search = AsyncMock(side_effect=Exception("Meilisearch down"))

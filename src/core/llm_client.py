@@ -1,9 +1,9 @@
 """LLM Client for Ollama/Qwen integration."""
 
 import asyncio
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import AsyncIterator
 
 import httpx
 import structlog

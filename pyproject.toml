@@ -74,7 +74,13 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
-ignore = ["E501"]
+ignore = [
+    "E501",   # line too long (handled by black)
+    "N806",   # uppercase variable in function (MockClient in tests)
+    "E402",   # import not at top (conditional sys.path in logger)
+    "UP042",  # str+Enum → StrEnum (breaks serialization)
+    "UP036",  # version block (intentional UX check in status cmd)
+]
 
 [tool.black]
 line-length = 100

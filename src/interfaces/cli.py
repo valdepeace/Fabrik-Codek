@@ -2,15 +2,14 @@
 
 import asyncio
 from pathlib import Path
-from typing import Optional
 from uuid import uuid4
 
 import typer
 from rich.console import Console
+from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
-from rich.markdown import Markdown
 
 app = typer.Typer(
     name="fabrik",
@@ -27,8 +26,8 @@ def async_run(coro):
 
 @app.command()
 def chat(
-    model: Optional[str] = typer.Option(None, "--model", "-m", help="Model to use"),
-    system: Optional[str] = typer.Option(None, "--system", "-s", help="System prompt"),
+    model: str | None = typer.Option(None, "--model", "-m", help="Model to use"),
+    system: str | None = typer.Option(None, "--system", "-s", help="System prompt"),
 ):
     """Start interactive chat with the assistant."""
     from prompt_toolkit import PromptSession
@@ -63,20 +62,24 @@ def chat(
                 return
 
             # Route via TaskRouter for adaptive system prompt
-            from src.core.personal_profile import get_active_profile
             from src.core.competence_model import get_active_competence_map
+            from src.core.personal_profile import get_active_profile
             from src.core.task_router import TaskRouter
 
             active_profile = get_active_profile()
             competence_map = get_active_competence_map()
             router = TaskRouter(competence_map, active_profile, settings)
 
+            from src.flywheel.collector import bridge_outcome_to_feedback
             from src.flywheel.outcome_tracker import OutcomeTracker
+
             tracker = OutcomeTracker(settings.datalake_path, str(uuid4()))
 
             initial_decision = await router.route("general conversation")
             if not system:
                 messages.insert(0, {"role": "system", "content": initial_decision.system_prompt})
+
+            last_record_id = None
 
             while True:
                 try:
@@ -114,7 +117,7 @@ def chat(
                 console.print(Markdown(response.content))
 
                 # Capture for flywheel
-                await collector.capture_prompt_response(
+                record = await collector.capture_prompt_response(
                     prompt=user_input,
                     response=response.content,
                     model=response.model,
@@ -123,13 +126,26 @@ def chat(
                     interaction_type="prompt_response",
                 )
 
-                # Track outcome
-                tracker.record_turn(
+                # Track outcome — record_turn returns the PREVIOUS turn's outcome
+                prev_outcome = tracker.record_turn(
                     query=user_input,
                     response=response.content,
                     decision=initial_decision,
                     latency_ms=response.latency_ms,
                 )
+
+                # Bridge: outcome -> feedback on the PREVIOUS record
+                if prev_outcome is not None and last_record_id is not None:
+                    try:
+                        await bridge_outcome_to_feedback(
+                            collector,
+                            prev_outcome,
+                            last_record_id,
+                        )
+                    except Exception:
+                        pass  # Non-critical: never crash chat for feedback
+
+                last_record_id = record.id
 
         tracker.close_session()
         stats = tracker.get_session_stats()
@@ -149,8 +165,8 @@ def chat(
 @app.command()
 def ask(
     prompt: str = typer.Argument(..., help="Question or task"),
-    model: Optional[str] = typer.Option(None, "--model", "-m"),
-    context_file: Optional[Path] = typer.Option(None, "--context", "-c", help="File for context"),
+    model: str | None = typer.Option(None, "--model", "-m"),
+    context_file: Path | None = typer.Option(None, "--context", "-c", help="File for context"),
     use_rag: bool = typer.Option(False, "--rag", "-r", help="Use RAG for context"),
     use_graph: bool = typer.Option(False, "--graph", "-g", help="Use hybrid RAG (vector + graph)"),
     graph_depth: int = typer.Option(2, "--depth", "-d", help="Graph traversal depth"),
@@ -171,8 +187,8 @@ def ask(
 
         # Route via TaskRouter for adaptive prompt/model/strategy
         from src.config import settings
-        from src.core.personal_profile import get_active_profile
         from src.core.competence_model import get_active_competence_map
+        from src.core.personal_profile import get_active_profile
         from src.core.task_router import TaskRouter
 
         active_profile = get_active_profile()
@@ -191,14 +207,17 @@ def ask(
         # Inject hybrid RAG context (vector + graph)
         if use_graph:
             from src.knowledge.hybrid_rag import HybridRAGEngine
+
             async with HybridRAGEngine() as hybrid:
                 results = await hybrid.retrieve(
-                    prompt, limit=5,
+                    prompt,
+                    limit=5,
                     graph_depth=decision.strategy.graph_depth,
                 )
                 if results:
                     final_prompt = await hybrid.query_with_context(
-                        prompt, limit=5,
+                        prompt,
+                        limit=5,
                         graph_depth=decision.strategy.graph_depth,
                     )
                     context = final_prompt
@@ -211,13 +230,13 @@ def ask(
         # Inject RAG context if requested (vector only)
         elif use_rag:
             from src.knowledge.rag import RAGEngine
+
             async with RAGEngine() as rag:
                 rag_results = await rag.retrieve(prompt, limit=3)
                 if rag_results:
-                    rag_context = "\n---\n".join([
-                        f"[{r['category']}] {r['text'][:500]}"
-                        for r in rag_results
-                    ])
+                    rag_context = "\n---\n".join(
+                        [f"[{r['category']}] {r['text'][:500]}" for r in rag_results]
+                    )
                     final_prompt = f"""Contexto de tu base de conocimiento:
 {rag_context}
 
@@ -226,7 +245,9 @@ Pregunta: {prompt}
 
 Responde usando el contexto cuando sea relevante."""
                     context = rag_context
-                    console.print(f"[dim]RAG: {len(rag_results)} documentos relevantes encontrados[/dim]\n")
+                    console.print(
+                        f"[dim]RAG: {len(rag_results)} documentos relevantes encontrados[/dim]\n"
+                    )
 
         async with LLMClient(model=model) as client:
             with Progress(
@@ -243,7 +264,9 @@ Responde usando el contexto cuando sea relevante."""
                 )
 
             console.print(Markdown(response.content))
-            console.print(f"\n[dim]({response.tokens_used} tokens, {response.latency_ms:.0f}ms)[/dim]")
+            console.print(
+                f"\n[dim]({response.tokens_used} tokens, {response.latency_ms:.0f}ms)[/dim]"
+            )
 
             collector = get_collector()
             await collector.capture_prompt_response(
@@ -258,6 +281,7 @@ Responde usando el contexto cuando sea relevante."""
 
             # Track outcome
             from src.flywheel.outcome_tracker import OutcomeTracker
+
             ot = OutcomeTracker(settings.datalake_path, str(uuid4()))
             ot.record_turn(
                 query=prompt,
@@ -273,7 +297,7 @@ Responde usando el contexto cuando sea relevante."""
 @app.command()
 def datalake(
     action: str = typer.Argument("stats", help="Action: stats, search, decisions, learnings"),
-    query: Optional[str] = typer.Option(None, "--query", "-q", help="Search query"),
+    query: str | None = typer.Option(None, "--query", "-q", help="Search query"),
 ):
     """Explore connected datalakes."""
     from src.knowledge import DatalakeConnector
@@ -359,11 +383,13 @@ def datalake(
                 learnings = await connector.get_learnings()
 
             console.print(f"\n[bold]Learnings:[/bold] {len(learnings)}\n")
-            for l in learnings[:10]:
-                console.print(f"[cyan]• {l.relative_path}[/cyan]")
+            for learning in learnings[:10]:
+                console.print(f"[cyan]• {learning.relative_path}[/cyan]")
 
         else:
-            console.print("[yellow]Acciones disponibles: stats, search, decisions, learnings[/yellow]")
+            console.print(
+                "[yellow]Acciones disponibles: stats, search, decisions, learnings[/yellow]"
+            )
 
     async_run(run())
 
@@ -412,7 +438,7 @@ def flywheel(
 @app.command()
 def rag(
     action: str = typer.Argument("stats", help="Action: index, search, stats"),
-    query: Optional[str] = typer.Option(None, "--query", "-q", help="Search query"),
+    query: str | None = typer.Option(None, "--query", "-q", help="Search query"),
 ):
     """RAG system - index and search knowledge base."""
     from src.knowledge.rag import RAGEngine
@@ -471,24 +497,39 @@ def rag(
 
 @app.command()
 def graph(
-    action: str = typer.Argument("stats", help="Action: build, search, stats, complete, prune, decay"),
-    query: Optional[str] = typer.Option(None, "--query", "-q", help="Search query"),
+    action: str = typer.Argument(
+        "stats", help="Action: build, search, stats, complete, prune, decay, aliases, drift"
+    ),
+    query: str | None = typer.Option(None, "--query", "-q", help="Search query"),
     depth: int = typer.Option(2, "--depth", "-d", help="Traversal depth for search"),
-    use_llm: bool = typer.Option(False, "--use-llm", help="Enable LLM extraction (requires Ollama)"),
+    use_llm: bool = typer.Option(
+        False, "--use-llm", help="Enable LLM extraction (requires Ollama)"
+    ),
     force: bool = typer.Option(False, "--force", help="Force rebuild from scratch"),
     include_transcripts: bool = typer.Option(
-        False, "--include-transcripts",
+        False,
+        "--include-transcripts",
         help="Include reasoning from Claude Code session transcripts",
     ),
-    min_mentions: int = typer.Option(1, "--min-mentions", help="Min mention_count to keep isolated entities"),
+    min_mentions: int = typer.Option(
+        1, "--min-mentions", help="Min mention_count to keep isolated entities"
+    ),
     min_weight: float = typer.Option(0.3, "--min-weight", help="Min edge weight to keep"),
-    keep_inferred: bool = typer.Option(False, "--keep-inferred", help="Preserve inferred edges during prune"),
+    keep_inferred: bool = typer.Option(
+        False, "--keep-inferred", help="Preserve inferred edges during prune"
+    ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview without modifying"),
     half_life: float = typer.Option(90.0, "--half-life", help="Decay half-life in days"),
+    threshold: float = typer.Option(
+        0.85, "--threshold", help="Similarity threshold for alias detection"
+    ),
+    apply: bool = typer.Option(False, "--apply", help="Apply alias merges (default: dry-run)"),
+    deduplicate: bool = typer.Option(
+        False, "--deduplicate", help="Run alias deduplication after build"
+    ),
 ):
-    """Knowledge Graph - build, search, and inspect."""
+    """Knowledge Graph - build, search, inspect, and deduplicate."""
     from src.knowledge.graph_engine import GraphEngine
-    from src.knowledge.graph_schema import make_entity_id
 
     engine = GraphEngine()
 
@@ -508,7 +549,10 @@ def graph(
                 transient=True,
             ) as progress:
                 progress.add_task("Construyendo Knowledge Graph...", total=None)
-                stats = await pipeline.build(force=force)
+                stats = await pipeline.build(
+                    force=force,
+                    deduplicate=deduplicate,
+                )
 
             console.print(Panel.fit("[bold green]Knowledge Graph Build Complete[/bold green]"))
             table = Table()
@@ -528,11 +572,22 @@ def graph(
                     "Triples inferidos",
                     str(stats["inferred_triples"]),
                 )
+            if stats.get("aliases_candidates", 0) > 0:
+                table.add_row(
+                    "Alias candidatos",
+                    str(stats["aliases_candidates"]),
+                )
+                table.add_row(
+                    "Aliases merged",
+                    str(stats.get("aliases_merged", 0)),
+                )
             console.print(table)
 
             graph_stats = engine.get_stats()
-            console.print(f"\n[dim]Entidades: {graph_stats['entity_count']} | "
-                          f"Relaciones: {graph_stats['edge_count']}[/dim]")
+            console.print(
+                f"\n[dim]Entidades: {graph_stats['entity_count']} | "
+                f"Relaciones: {graph_stats['edge_count']}[/dim]"
+            )
 
         async_run(run_build())
 
@@ -638,7 +693,11 @@ def graph(
         if not dry_run:
             engine.save()
 
-        title = "[bold yellow]Graph Prune Preview (dry-run)[/bold yellow]" if dry_run else "[bold green]Graph Prune Complete[/bold green]"
+        title = (
+            "[bold yellow]Graph Prune Preview (dry-run)[/bold yellow]"
+            if dry_run
+            else "[bold green]Graph Prune Complete[/bold green]"
+        )
         console.print(Panel.fit(title))
 
         table = Table()
@@ -687,16 +746,163 @@ def graph(
         table.add_row("Half-life", f"{half_life} days")
         console.print(table)
 
+    elif action == "aliases":
+        if not engine.load():
+            console.print("[yellow]No hay Knowledge Graph construido.[/yellow]")
+            console.print("[dim]Ejecuta: fabrik graph build[/dim]")
+            return
+
+        import httpx
+
+        from src.config import settings as fabrik_settings
+
+        async def run_aliases():
+            entity_names = {eid: entity.name for eid, entity in engine._entities.items()}
+
+            if not entity_names:
+                console.print("[yellow]El grafo no tiene entidades.[/yellow]")
+                return
+
+            # Compute embeddings via Ollama
+            embeddings: dict[str, list[float]] = {}
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                console=console,
+                transient=True,
+            ) as progress:
+                progress.add_task(
+                    f"Generando embeddings para {len(entity_names)} entidades...",
+                    total=None,
+                )
+                async with httpx.AsyncClient(timeout=60.0) as client:
+                    for eid, name in entity_names.items():
+                        try:
+                            resp = await client.post(
+                                f"{fabrik_settings.ollama_host}/api/embeddings",
+                                json={
+                                    "model": fabrik_settings.embedding_model,
+                                    "prompt": name,
+                                },
+                            )
+                            resp.raise_for_status()
+                            embeddings[eid] = resp.json()["embedding"]
+                        except (httpx.HTTPError, KeyError, OSError):
+                            pass  # Skip entities that fail to embed
+
+            if not embeddings:
+                console.print(
+                    "[red]No se pudieron generar embeddings. Verifica que Ollama esta corriendo.[/red]"
+                )
+                return
+
+            is_dry_run = not apply
+            result = engine.deduplicate_aliases(
+                embeddings,
+                threshold=threshold,
+                dry_run=is_dry_run,
+            )
+
+            if not is_dry_run:
+                engine.save()
+
+            title = (
+                "[bold yellow]Alias Detection Preview (dry-run)[/bold yellow]"
+                if is_dry_run
+                else "[bold green]Alias Deduplication Applied[/bold green]"
+            )
+            console.print(Panel.fit(title))
+
+            # Show pairs table
+            if result["pairs"]:
+                pairs_table = Table(title="Alias Pairs Detected")
+                pairs_table.add_column("Canonical", style="cyan")
+                pairs_table.add_column("Alias", style="yellow")
+                pairs_table.add_column("Similarity", style="green")
+                for canonical, alias_name, sim in result["pairs"]:
+                    pairs_table.add_row(canonical, alias_name, f"{sim:.4f}")
+                console.print(pairs_table)
+
+            # Summary stats
+            summary = Table()
+            summary.add_column("Metrica", style="cyan")
+            summary.add_column("Valor", style="green")
+            summary.add_row("Entidades analizadas", str(len(embeddings)))
+            summary.add_row("Candidatos detectados", str(result["candidates"]))
+            summary.add_row("Merges aplicados", str(result["merged"]))
+            summary.add_row("Threshold", f"{threshold:.2f}")
+            console.print(summary)
+
+        async_run(run_aliases())
+
+    elif action == "drift":
+        if not engine.load():
+            console.print("[yellow]No hay Knowledge Graph construido.[/yellow]")
+            console.print("[dim]Ejecuta: fabrik graph build[/dim]")
+            return
+
+        if dry_run:
+            # Live detection: compare current state vs stored snapshots
+            events = engine.detect_drift(threshold=threshold)
+            if events:
+                console.print(
+                    Panel.fit(
+                        f"[bold yellow]Drift Detection Preview: {len(events)} entities[/bold yellow]"
+                    )
+                )
+                drift_table = Table()
+                drift_table.add_column("Entity", style="cyan")
+                drift_table.add_column("Type", style="dim")
+                drift_table.add_column("Jaccard", style="yellow")
+                drift_table.add_column("Added", style="green")
+                drift_table.add_column("Removed", style="red")
+                for ev in events[:20]:
+                    drift_table.add_row(
+                        ev.entity_name,
+                        ev.entity_type,
+                        f"{ev.jaccard_similarity:.2f}",
+                        ", ".join(ev.added[:3]) or "-",
+                        ", ".join(ev.removed[:3]) or "-",
+                    )
+                console.print(drift_table)
+            else:
+                console.print("[green]No semantic drift detected.[/green]")
+        else:
+            # Show drift log history
+            entries = engine.load_drift_log(entity_name=query)
+            if entries:
+                console.print(Panel.fit(f"[bold]Drift Log: {len(entries)} events[/bold]"))
+                drift_table = Table()
+                drift_table.add_column("Timestamp", style="dim")
+                drift_table.add_column("Entity", style="cyan")
+                drift_table.add_column("Jaccard", style="yellow")
+                drift_table.add_column("Added", style="green")
+                drift_table.add_column("Removed", style="red")
+                for entry in entries[-20:]:
+                    drift_table.add_row(
+                        entry.get("timestamp", "")[:19],
+                        entry.get("entity_name", ""),
+                        f"{entry.get('jaccard_similarity', 0):.2f}",
+                        ", ".join(entry.get("added", [])[:3]) or "-",
+                        ", ".join(entry.get("removed", [])[:3]) or "-",
+                    )
+                console.print(drift_table)
+            else:
+                console.print("[dim]No drift events in log.[/dim]")
+
     else:
-        console.print("[yellow]Uso: graph build | search | stats | complete | prune | decay[/yellow]")
+        console.print(
+            "[yellow]Uso: graph build | search | stats | complete | prune | decay | aliases | drift[/yellow]"
+        )
 
 
 @app.command()
 def learn(
-    action: str = typer.Argument("process", help="Action: process, stats, reset"),
+    action: str = typer.Argument("process", help="Action: process, stats, reset, watch"),
+    interval: int = typer.Option(60, help="Seconds between watch cycles"),
 ):
     """Learn from Claude Code sessions - extract training data."""
-    from src.flywheel.session_observer import process_all_sessions, get_stats, PROCESSED_MARKER
+    from src.flywheel.session_observer import PROCESSED_MARKER, get_stats, process_all_sessions
 
     if action == "process":
         with Progress(
@@ -746,12 +952,49 @@ def learn(
         else:
             console.print("[yellow]Nada que resetear.[/yellow]")
 
+    elif action == "watch":
+        import signal
+
+        console.print(f"[bold]Watching sessions every {interval}s... (Ctrl+C to stop)[/bold]")
+
+        async def run_watch():
+            stop = asyncio.Event()
+
+            def handle_signal():
+                stop.set()
+
+            loop = asyncio.get_event_loop()
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                loop.add_signal_handler(sig, handle_signal)
+
+            while not stop.is_set():
+                try:
+                    stats = process_all_sessions(min_quality=0.4)
+                    if stats["sessions_processed"] > 0:
+                        console.print(
+                            f"[green]Processed {stats['sessions_processed']} sessions, "
+                            f"{stats['pairs_extracted']} pairs extracted[/green]"
+                        )
+                except Exception as e:
+                    console.print(f"[red]Error: {e}[/red]")
+
+                try:
+                    await asyncio.wait_for(stop.wait(), timeout=interval)
+                except TimeoutError:
+                    pass  # Normal: timeout expired, continue polling
+
+            console.print("[yellow]Watch mode stopped.[/yellow]")
+
+        asyncio.run(run_watch())
+
 
 @app.command()
 def finetune(
     epochs: int = typer.Option(3, "--epochs", "-e", help="Training epochs"),
     batch_size: int = typer.Option(2, "--batch-size", "-b", help="Batch size"),
-    max_samples: Optional[int] = typer.Option(None, "--max-samples", "-n", help="Limit training samples"),
+    max_samples: int | None = typer.Option(
+        None, "--max-samples", "-n", help="Limit training samples"
+    ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show stats without training"),
 ):
     """Fine-tune Qwen with your training data."""
@@ -760,6 +1003,7 @@ def finetune(
     if dry_run:
         # Just show training data stats
         from src.flywheel.session_observer import get_stats
+
         stats = get_stats()
 
         console.print(Panel.fit("[bold]Fine-tuning Data[/bold]"))
@@ -779,9 +1023,12 @@ def finetune(
 
     # Run finetune script
     cmd = [
-        "python", "scripts/finetune.py",
-        "--epochs", str(epochs),
-        "--batch-size", str(batch_size),
+        "python",
+        "scripts/finetune.py",
+        "--epochs",
+        str(epochs),
+        "--batch-size",
+        str(batch_size),
     ]
     if max_samples:
         cmd.extend(["--max-samples", str(max_samples)])
@@ -814,8 +1061,8 @@ def models():
 
 @app.command()
 def serve(
-    host: Optional[str] = typer.Option(None, "--host", "-h", help="Bind host"),
-    port: Optional[int] = typer.Option(None, "--port", "-p", help="Bind port"),
+    host: str | None = typer.Option(None, "--host", "-h", help="Bind host"),
+    port: int | None = typer.Option(None, "--port", "-p", help="Bind port"),
     reload: bool = typer.Option(False, "--reload", help="Auto-reload on code changes"),
 ):
     """Start the Fabrik-Codek API server."""
@@ -828,8 +1075,7 @@ def serve(
 
     console.print(
         Panel.fit(
-            f"[bold blue]Fabrik-Codek API[/bold blue]\n"
-            f"http://{bind_host}:{bind_port}",
+            f"[bold blue]Fabrik-Codek API[/bold blue]\n" f"http://{bind_host}:{bind_port}",
             subtitle="Ctrl+C to stop",
         )
     )
@@ -875,6 +1121,7 @@ def status():
 
     # Knowledge Graph
     from src.knowledge.graph_engine import GraphEngine
+
     graph_engine = GraphEngine()
     if graph_engine.load():
         gstats = graph_engine.get_stats()
@@ -915,10 +1162,12 @@ def init(
     import sys
     import urllib.request
 
-    console.print(Panel.fit(
-        "[bold blue]Fabrik-Codek Setup[/bold blue] - Claude's Little Brother",
-        subtitle="Initializing...",
-    ))
+    console.print(
+        Panel.fit(
+            "[bold blue]Fabrik-Codek Setup[/bold blue] - Claude's Little Brother",
+            subtitle="Initializing...",
+        )
+    )
     console.print()
 
     errors = []
@@ -947,14 +1196,15 @@ def init(
         if ollama_running:
             console.print("[green]✓[/green] Ollama server running")
         else:
-            console.print("[yellow]![/yellow] Ollama not running. Start with: [bold]ollama serve[/bold]")
+            console.print(
+                "[yellow]![/yellow] Ollama not running. Start with: [bold]ollama serve[/bold]"
+            )
     else:
         console.print("[yellow]![/yellow] Ollama not installed")
         console.print("  Install: [bold]curl -fsSL https://ollama.com/install.sh | sh[/bold]")
 
     # 3. Create .env if not exists
     console.print()
-    from src.config.settings import Settings
 
     project_root = Path(__file__).parent.parent.parent
     env_file = project_root / ".env"
@@ -999,7 +1249,9 @@ def init(
             try:
                 result = subprocess.run(
                     ["ollama", "list"],
-                    capture_output=True, text=True, timeout=10,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
                 )
                 if model_name in result.stdout:
                     console.print(f"[green]✓[/green] {model_name} available")
@@ -1029,32 +1281,36 @@ def init(
     # 6. Summary
     console.print()
     if errors:
-        console.print(Panel.fit(
-            "[bold red]Setup incomplete[/bold red]\n" +
-            "\n".join(f"  • {e}" for e in errors),
-        ))
+        console.print(
+            Panel.fit(
+                "[bold red]Setup incomplete[/bold red]\n" + "\n".join(f"  • {e}" for e in errors),
+            )
+        )
         raise typer.Exit(code=1)
 
-    console.print(Panel.fit(
-        "[bold green]Setup Complete![/bold green]\n\n"
-        "  [bold]fabrik status[/bold]     Check system health\n"
-        "  [bold]fabrik chat[/bold]       Start interactive chat\n"
-        "  [bold]fabrik ask \"...\"[/bold]  Ask a single question\n"
-        "  [bold]fabrik mcp[/bold]        Start as MCP server",
-        subtitle="Ready to go",
-    ))
+    console.print(
+        Panel.fit(
+            "[bold green]Setup Complete![/bold green]\n\n"
+            "  [bold]fabrik status[/bold]     Check system health\n"
+            "  [bold]fabrik chat[/bold]       Start interactive chat\n"
+            '  [bold]fabrik ask "..."[/bold]  Ask a single question\n'
+            "  [bold]fabrik mcp[/bold]        Start as MCP server",
+            subtitle="Ready to go",
+        )
+    )
 
 
 @app.command()
 def mcp(
     transport: str = typer.Option("stdio", "--transport", "-t", help="Transport: stdio or sse"),
-    port: Optional[int] = typer.Option(None, "--port", "-p", help="Port for SSE transport"),
+    port: int | None = typer.Option(None, "--port", "-p", help="Port for SSE transport"),
 ):
     """Start Fabrik-Codek as an MCP server for agent integration."""
     from src.interfaces.mcp_server import mcp as mcp_server
 
     if transport == "sse":
         from src.config import settings
+
         bind_port = port or settings.mcp_port
         console.print(
             Panel.fit(
@@ -1071,13 +1327,14 @@ def mcp(
 @app.command()
 def fulltext(
     action: str = typer.Argument("status", help="Action: status, index, search"),
-    query: Optional[str] = typer.Option(None, "--query", "-q", help="Search query"),
+    query: str | None = typer.Option(None, "--query", "-q", help="Search query"),
     limit: int = typer.Option(5, "--limit", "-n", help="Max results"),
 ):
     """Full-text search via Meilisearch - status, index datalake, or search."""
     from src.knowledge.fulltext_engine import FullTextEngine
 
     if action == "status":
+
         async def _check():
             async with FullTextEngine() as ft:
                 healthy = await ft.health_check()
@@ -1128,13 +1385,19 @@ def fulltext(
                                     text = record.get("output", record.get("text", ""))
                                     instruction = record.get("instruction", "")
                                     if text and len(text) >= 50:
-                                        docs.append({
-                                            "id": FullTextEngine.make_doc_id(text, f.name),
-                                            "text": f"{instruction}\n{text}" if instruction else text,
-                                            "source": f.name,
-                                            "category": "training",
-                                            "project": record.get("project", ""),
-                                        })
+                                        docs.append(
+                                            {
+                                                "id": FullTextEngine.make_doc_id(text, f.name),
+                                                "text": (
+                                                    f"{instruction}\n{text}"
+                                                    if instruction
+                                                    else text
+                                                ),
+                                                "source": f.name,
+                                                "category": "training",
+                                                "project": record.get("project", ""),
+                                            }
+                                        )
                                 except json_mod.JSONDecodeError:
                                     continue
                             if docs:
@@ -1222,9 +1485,7 @@ def profile(
         table.add_row("Total Entries", str(loaded.total_entries))
 
         if loaded.top_topics:
-            topics_str = "\n".join(
-                f"  {t.topic}: {t.weight:.0%}" for t in loaded.top_topics[:8]
-            )
+            topics_str = "\n".join(f"  {t.topic}: {t.weight:.0%}" for t in loaded.top_topics[:8])
             table.add_row("Top Topics", topics_str)
 
         if loaded.patterns:
@@ -1233,10 +1494,12 @@ def profile(
         if loaded.task_types_detected:
             table.add_row("Task Types", ", ".join(loaded.task_types_detected))
 
-        table.add_row("Style", f"Formality: {loaded.style.formality:.0%}, Language: {loaded.style.language}")
+        table.add_row(
+            "Style", f"Formality: {loaded.style.formality:.0%}, Language: {loaded.style.language}"
+        )
         console.print(table)
 
-        console.print(f"\n[dim]System prompt preview:[/dim]")
+        console.print("\n[dim]System prompt preview:[/dim]")
         console.print(f"[italic]{loaded.to_system_prompt()}[/italic]")
     else:
         console.print("[yellow]Usage:[/yellow] fabrik profile [show|build]")
@@ -1249,7 +1512,8 @@ def competence(
     """Manage your competence map — measures depth of knowledge per topic."""
     from src.config import settings
     from src.core.competence_model import (
-        CompetenceBuilder, load_competence_map, save_competence_map,
+        CompetenceBuilder,
+        load_competence_map,
     )
 
     competence_path = settings.data_dir / "profile" / "competence_map.json"
@@ -1261,6 +1525,7 @@ def competence(
         graph = None
         try:
             from src.knowledge.graph_engine import GraphEngine
+
             graph = GraphEngine()
             if not graph.load():
                 graph = None
@@ -1307,6 +1572,7 @@ def competence(
 
         # Generate strategy overrides from outcome data
         from src.core.strategy_optimizer import StrategyOptimizer
+
         optimizer = StrategyOptimizer(settings.datalake_path)
         overrides_path = settings.data_dir / "profile" / "strategy_overrides.json"
         override_count = optimizer.save_overrides(overrides_path)
@@ -1318,7 +1584,9 @@ def competence(
     elif action == "show":
         loaded = load_competence_map(competence_path)
         if not loaded.topics:
-            console.print("[yellow]No competence map built yet. Run:[/yellow] fabrik competence build")
+            console.print(
+                "[yellow]No competence map built yet. Run:[/yellow] fabrik competence build"
+            )
             return
 
         table = Table(title="Competence Map")
@@ -1342,7 +1610,7 @@ def competence(
 
         fragment = loaded.to_system_prompt_fragment()
         if fragment:
-            console.print(f"\n[dim]System prompt fragment:[/dim]")
+            console.print("\n[dim]System prompt fragment:[/dim]")
             console.print(f"[italic]{fragment}[/italic]")
 
     else:
@@ -1352,12 +1620,13 @@ def competence(
 @app.command()
 def outcomes(
     action: str = typer.Argument("stats", help="Action: show or stats"),
-    topic: Optional[str] = typer.Option(None, "--topic", "-t", help="Filter by topic"),
-    task_type: Optional[str] = typer.Option(None, "--task-type", help="Filter by task type"),
+    topic: str | None = typer.Option(None, "--topic", "-t", help="Filter by topic"),
+    task_type: str | None = typer.Option(None, "--task-type", help="Filter by task type"),
     limit: int = typer.Option(20, "--limit", "-n", help="Number of records"),
 ):
     """View outcome tracking data."""
     import json as json_mod
+
     from src.config import settings
 
     outcomes_dir = settings.datalake_path / "01-raw" / "outcomes"
@@ -1479,7 +1748,9 @@ def outcomes(
                 pass
 
     else:
-        console.print("[yellow]Usage:[/yellow] fabrik outcomes [show|stats] [--topic X] [--task-type X]")
+        console.print(
+            "[yellow]Usage:[/yellow] fabrik outcomes [show|stats] [--topic X] [--task-type X]"
+        )
 
 
 @app.command()
@@ -1507,8 +1778,11 @@ def router(
         table.add_row("Task Type", f"{decision.task_type} ({decision.classification_method})")
         table.add_row(
             "Topic",
-            f"{decision.topic} ({decision.competence_level}, score={competence_map.get_score(decision.topic):.2f})"
-            if decision.topic else "— (Unknown)",
+            (
+                f"{decision.topic} ({decision.competence_level}, score={competence_map.get_score(decision.topic):.2f})"
+                if decision.topic
+                else "— (Unknown)"
+            ),
         )
         table.add_row("Model", decision.model)
         table.add_row(
@@ -1519,7 +1793,7 @@ def router(
         )
         console.print(table)
 
-        console.print(f"\n[dim]System prompt:[/dim]")
+        console.print("\n[dim]System prompt:[/dim]")
         console.print(f"[italic]{decision.system_prompt}[/italic]")
 
     if action == "test":

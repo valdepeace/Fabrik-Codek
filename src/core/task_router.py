@@ -8,7 +8,7 @@ task type and user competence level.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -56,32 +56,75 @@ class RoutingDecision:
 
 TASK_KEYWORDS: dict[str, list[str]] = {
     "debugging": [
-        "error", "bug", "fix", "crash", "traceback",
-        "exception", "fails", "broken", "issue", "wrong",
+        "error",
+        "bug",
+        "fix",
+        "crash",
+        "traceback",
+        "exception",
+        "fails",
+        "broken",
+        "issue",
+        "wrong",
     ],
     "code_review": [
-        "review", "refactor", "clean", "improve",
-        "quality", "smell", "readable",
+        "review",
+        "refactor",
+        "clean",
+        "improve",
+        "quality",
+        "smell",
+        "readable",
     ],
     "architecture": [
-        "design", "pattern", "structure", "ddd",
-        "hexagonal", "module", "architecture", "component",
+        "design",
+        "pattern",
+        "structure",
+        "ddd",
+        "hexagonal",
+        "module",
+        "architecture",
+        "component",
     ],
     "explanation": [
-        "explain", "how", "why", "what is",
-        "difference", "compare", "understand", "meaning",
+        "explain",
+        "how",
+        "why",
+        "what is",
+        "difference",
+        "compare",
+        "understand",
+        "meaning",
     ],
     "testing": [
-        "test", "assert", "mock", "coverage",
-        "pytest", "spec", "unit test", "integration test",
+        "test",
+        "assert",
+        "mock",
+        "coverage",
+        "pytest",
+        "spec",
+        "unit test",
+        "integration test",
     ],
     "devops": [
-        "deploy", "docker", "kubernetes", "ci/cd",
-        "pipeline", "terraform", "nginx", "container",
+        "deploy",
+        "docker",
+        "kubernetes",
+        "ci/cd",
+        "pipeline",
+        "terraform",
+        "nginx",
+        "container",
     ],
     "ml_engineering": [
-        "model", "training", "fine-tune", "embedding",
-        "rag", "llm", "vector", "dataset",
+        "model",
+        "training",
+        "fine-tune",
+        "embedding",
+        "rag",
+        "llm",
+        "vector",
+        "dataset",
     ],
 }
 
@@ -157,14 +200,14 @@ def detect_topic(query: str, competence_map: CompetenceMap) -> str | None:
 # ---------------------------------------------------------------------------
 
 TASK_STRATEGIES: dict[str, dict] = {
-    "debugging":      {"graph_depth": 2, "vector_weight": 0.5, "graph_weight": 0.5},
-    "code_review":    {"graph_depth": 1, "vector_weight": 0.7, "graph_weight": 0.3},
-    "architecture":   {"graph_depth": 3, "vector_weight": 0.4, "graph_weight": 0.6},
-    "explanation":    {"graph_depth": 2, "vector_weight": 0.6, "graph_weight": 0.4},
-    "testing":        {"graph_depth": 2, "vector_weight": 0.6, "graph_weight": 0.4},
-    "devops":         {"graph_depth": 1, "vector_weight": 0.7, "graph_weight": 0.3},
+    "debugging": {"graph_depth": 2, "vector_weight": 0.5, "graph_weight": 0.5},
+    "code_review": {"graph_depth": 1, "vector_weight": 0.7, "graph_weight": 0.3},
+    "architecture": {"graph_depth": 3, "vector_weight": 0.4, "graph_weight": 0.6},
+    "explanation": {"graph_depth": 2, "vector_weight": 0.6, "graph_weight": 0.4},
+    "testing": {"graph_depth": 2, "vector_weight": 0.6, "graph_weight": 0.4},
+    "devops": {"graph_depth": 1, "vector_weight": 0.7, "graph_weight": 0.3},
     "ml_engineering": {"graph_depth": 2, "vector_weight": 0.5, "graph_weight": 0.5},
-    "general":        {"graph_depth": 2, "vector_weight": 0.6, "graph_weight": 0.4},
+    "general": {"graph_depth": 2, "vector_weight": 0.6, "graph_weight": 0.4},
 }
 
 TASK_INSTRUCTIONS: dict[str, str] = {
@@ -264,6 +307,7 @@ def _get_llm_client():
     intercept the router's internal classification client.
     """
     from src.core.llm_client import LLMClient
+
     return LLMClient()
 
 
@@ -327,7 +371,7 @@ class TaskRouter:
         if not override_path.exists():
             return {}
         try:
-            with open(override_path, "r", encoding="utf-8") as f:
+            with open(override_path, encoding="utf-8") as f:
                 return json.load(f)
         except (json.JSONDecodeError, OSError):
             return {}
@@ -346,9 +390,7 @@ class TaskRouter:
         topic = detect_topic(query, self.competence_map)
 
         # 3. Get competence level
-        competence_level = (
-            self.competence_map.get_level(topic) if topic else "Unknown"
-        )
+        competence_level = self.competence_map.get_level(topic) if topic else "Unknown"
 
         # 4. Select model (escalate if Novice/Unknown)
         model = get_model(competence_level, self.default_model, self.fallback_model)
@@ -371,7 +413,9 @@ class TaskRouter:
 
         # 6. Build adapted system prompt
         system_prompt = build_system_prompt(
-            self.profile, self.competence_map, task_type,
+            self.profile,
+            self.competence_map,
+            task_type,
         )
 
         decision = RoutingDecision(

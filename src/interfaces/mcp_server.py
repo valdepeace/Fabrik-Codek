@@ -98,8 +98,8 @@ async def lifespan(server: FastMCP):
 
     # 6. Task Router
     try:
-        from src.core.personal_profile import get_active_profile
         from src.core.competence_model import get_active_competence_map
+        from src.core.personal_profile import get_active_profile
         from src.core.task_router import TaskRouter
 
         profile = get_active_profile()
@@ -243,14 +243,16 @@ async def fabrik_graph_search(query: str, limit: int = 10, depth: int = 2) -> st
         except Exception:
             neighbor_names = []
 
-        entity_results.append({
-            "id": e.id,
-            "name": e.name,
-            "entity_type": e.entity_type.value,
-            "mention_count": e.mention_count,
-            "aliases": e.aliases,
-            "neighbors": neighbor_names,
-        })
+        entity_results.append(
+            {
+                "id": e.id,
+                "name": e.name,
+                "entity_type": e.entity_type.value,
+                "mention_count": e.mention_count,
+                "aliases": e.aliases,
+                "neighbors": neighbor_names,
+            }
+        )
 
     return json.dumps({"entities": entity_results, "count": len(entity_results)})
 
@@ -298,7 +300,9 @@ async def fabrik_ask(
     if use_graph and _state.get("hybrid"):
         try:
             results = await _state["hybrid"].retrieve(
-                prompt, limit=5, graph_depth=effective_depth,
+                prompt,
+                limit=5,
+                graph_depth=effective_depth,
             )
             if results:
                 context = "\n---\n".join(
@@ -356,12 +360,16 @@ async def fabrik_ask(
         "tokens_used": response.tokens_used,
         "latency_ms": response.latency_ms,
         "sources": sources,
-        "routing": {
-            "task_type": decision.task_type,
-            "topic": decision.topic,
-            "competence": decision.competence_level,
-            "method": decision.classification_method,
-        } if decision else None,
+        "routing": (
+            {
+                "task_type": decision.task_type,
+                "topic": decision.topic,
+                "competence": decision.competence_level,
+                "method": decision.classification_method,
+            }
+            if decision
+            else None
+        ),
     }
     return json.dumps(result)
 
@@ -374,34 +382,40 @@ async def fabrik_graph_stats() -> str:
     """Get statistics of the knowledge graph."""
     graph = _state.get("graph")
     if graph is None:
-        return json.dumps({
-            "entity_count": 0,
-            "edge_count": 0,
-            "connected_components": 0,
-            "entity_types": {},
-            "relation_types": {},
-            "error": "Graph engine not available",
-        })
+        return json.dumps(
+            {
+                "entity_count": 0,
+                "edge_count": 0,
+                "connected_components": 0,
+                "entity_types": {},
+                "relation_types": {},
+                "error": "Graph engine not available",
+            }
+        )
 
     try:
         stats = graph.get_stats()
     except Exception as exc:
-        return json.dumps({
-            "entity_count": 0,
-            "edge_count": 0,
-            "connected_components": 0,
-            "entity_types": {},
-            "relation_types": {},
-            "error": str(exc),
-        })
+        return json.dumps(
+            {
+                "entity_count": 0,
+                "edge_count": 0,
+                "connected_components": 0,
+                "entity_types": {},
+                "relation_types": {},
+                "error": str(exc),
+            }
+        )
 
-    return json.dumps({
-        "entity_count": stats["entity_count"],
-        "edge_count": stats["edge_count"],
-        "connected_components": stats["connected_components"],
-        "entity_types": stats["entity_types"],
-        "relation_types": stats["relation_types"],
-    })
+    return json.dumps(
+        {
+            "entity_count": stats["entity_count"],
+            "edge_count": stats["edge_count"],
+            "connected_components": stats["connected_components"],
+            "entity_types": stats["entity_types"],
+            "relation_types": stats["relation_types"],
+        }
+    )
 
 
 @mcp.tool(
@@ -413,7 +427,9 @@ async def fabrik_graph_stats() -> str:
     ),
 )
 async def fabrik_fulltext_search(
-    query: str, limit: int = 5, category: str | None = None,
+    query: str,
+    limit: int = 5,
+    category: str | None = None,
 ) -> str:
     """Full-text search using Meilisearch."""
     limit = max(1, min(limit, 50))

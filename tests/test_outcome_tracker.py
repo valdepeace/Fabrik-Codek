@@ -1,10 +1,6 @@
 """Tests for OutcomeRecord, infer_outcome, and OutcomeTracker."""
 
 import json
-from dataclasses import asdict
-from pathlib import Path
-
-import pytest
 
 from src.core.task_router import RetrievalStrategy, RoutingDecision
 from src.flywheel.outcome_tracker import (
@@ -17,7 +13,6 @@ from src.flywheel.outcome_tracker import (
     infer_outcome,
     token_similarity,
 )
-
 
 # ---------------------------------------------------------------------------
 # OutcomeRecord data model

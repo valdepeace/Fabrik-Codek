@@ -1,19 +1,16 @@
 """Tests for the Strategy Optimizer."""
 
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 import pytest
 
 from src.core.strategy_optimizer import (
-    HIGH_ACCEPTANCE_THRESHOLD,
-    MEDIUM_ACCEPTANCE_THRESHOLD,
     MINIMUM_SAMPLE_SIZE,
     StrategyOptimizer,
 )
 from src.core.task_router import TASK_STRATEGIES
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -72,10 +69,9 @@ class TestHighAcceptance:
     def test_high_acceptance_no_override(self, tmp_path: Path) -> None:
         """Acceptance rate >= 0.7 produces no override (defaults are fine)."""
         # 8 accepted + 2 rejected = 80% acceptance rate
-        outcomes = (
-            [_make_outcome(outcome="accepted") for _ in range(8)]
-            + [_make_outcome(outcome="rejected") for _ in range(2)]
-        )
+        outcomes = [_make_outcome(outcome="accepted") for _ in range(8)] + [
+            _make_outcome(outcome="rejected") for _ in range(2)
+        ]
         _write_outcomes(tmp_path, outcomes)
 
         optimizer = StrategyOptimizer(tmp_path)
@@ -87,10 +83,9 @@ class TestMediumAcceptance:
     def test_medium_acceptance_mild_boost(self, tmp_path: Path) -> None:
         """Acceptance rate 0.5-0.7 boosts graph_depth +1 and graph_weight +0.1."""
         # 6 accepted + 4 rejected = 60% acceptance (between 0.5 and 0.7)
-        outcomes = (
-            [_make_outcome(outcome="accepted") for _ in range(6)]
-            + [_make_outcome(outcome="rejected") for _ in range(4)]
-        )
+        outcomes = [_make_outcome(outcome="accepted") for _ in range(6)] + [
+            _make_outcome(outcome="rejected") for _ in range(4)
+        ]
         _write_outcomes(tmp_path, outcomes)
 
         optimizer = StrategyOptimizer(tmp_path)
@@ -114,10 +109,9 @@ class TestLowAcceptance:
     def test_low_acceptance_strong_boost(self, tmp_path: Path) -> None:
         """Acceptance rate < 0.5 gets depth +2, weight +0.2, fulltext 0.1."""
         # 4 accepted + 6 rejected = 40% acceptance (below 0.5)
-        outcomes = (
-            [_make_outcome(outcome="accepted") for _ in range(4)]
-            + [_make_outcome(outcome="rejected") for _ in range(6)]
-        )
+        outcomes = [_make_outcome(outcome="accepted") for _ in range(4)] + [
+            _make_outcome(outcome="rejected") for _ in range(6)
+        ]
         _write_outcomes(tmp_path, outcomes)
 
         optimizer = StrategyOptimizer(tmp_path)
@@ -156,10 +150,9 @@ class TestSaveOverrides:
     def test_save_overrides(self, tmp_path: Path) -> None:
         """save_overrides writes JSON file and returns count of overrides."""
         # Low acceptance to produce an override
-        outcomes = (
-            [_make_outcome(outcome="accepted") for _ in range(4)]
-            + [_make_outcome(outcome="rejected") for _ in range(6)]
-        )
+        outcomes = [_make_outcome(outcome="accepted") for _ in range(4)] + [
+            _make_outcome(outcome="rejected") for _ in range(6)
+        ]
         _write_outcomes(tmp_path, outcomes)
 
         optimizer = StrategyOptimizer(tmp_path)
@@ -177,10 +170,9 @@ class TestSaveOverrides:
 class TestNoneTopicKey:
     def test_none_topic_uses_task_type_only(self, tmp_path: Path) -> None:
         """When topic is None, the key is just the task_type string."""
-        outcomes = (
-            [_make_outcome(topic=None, outcome="accepted") for _ in range(4)]
-            + [_make_outcome(topic=None, outcome="rejected") for _ in range(6)]
-        )
+        outcomes = [_make_outcome(topic=None, outcome="accepted") for _ in range(4)] + [
+            _make_outcome(topic=None, outcome="rejected") for _ in range(6)
+        ]
         _write_outcomes(tmp_path, outcomes)
 
         optimizer = StrategyOptimizer(tmp_path)

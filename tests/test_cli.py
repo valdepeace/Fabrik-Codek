@@ -11,9 +11,8 @@ the __init__.py re-export, so we patch at the package __init__ level
 
 import asyncio
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
-import pytest
 from typer.testing import CliRunner
 
 from src.interfaces.cli import app
@@ -24,6 +23,7 @@ runner = CliRunner()
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_llm_response(**overrides):
     """Build a mock LLMResponse-like object."""
@@ -46,11 +46,13 @@ def _make_async_context_manager(instance):
 # TestStatus
 # ===================================================================
 
+
 class TestStatus:
     """Tests for the ``status`` command."""
 
-    def _run_status(self, *, datalake_exists=True, flywheel_enabled=True,
-                    graph_loaded=True, ollama_ok=True):
+    def _run_status(
+        self, *, datalake_exists=True, flywheel_enabled=True, graph_loaded=True, ollama_ok=True
+    ):
         """Helper to invoke ``status`` with controlled mocks."""
         mock_settings = MagicMock()
         mock_settings.default_model = "qwen2.5-coder:7b"
@@ -108,14 +110,13 @@ class TestStatus:
 # TestModels
 # ===================================================================
 
+
 class TestModels:
     """Tests for the ``models`` command."""
 
     def _patch_llm(self, mock_client):
         """Return a context manager that patches LLMClient at all import paths."""
-        return (
-            patch("src.core.LLMClient", return_value=mock_client),
-        )
+        return (patch("src.core.LLMClient", return_value=mock_client),)
 
     def test_models_lists_available(self):
         """models command lists models from Ollama."""
@@ -161,6 +162,7 @@ class TestModels:
 # TestGraph
 # ===================================================================
 
+
 class TestGraph:
     """Tests for the ``graph`` command group."""
 
@@ -202,16 +204,20 @@ class TestGraph:
         mock_engine.get_stats.return_value = {"entity_count": 100, "edge_count": 200}
 
         mock_pipeline = MagicMock()
-        mock_pipeline.build = AsyncMock(return_value={
-            "files_processed": 10,
-            "pairs_processed": 500,
-            "triples_extracted": 200,
-            "errors": 0,
-        })
+        mock_pipeline.build = AsyncMock(
+            return_value={
+                "files_processed": 10,
+                "pairs_processed": 500,
+                "triples_extracted": 200,
+                "errors": 0,
+            }
+        )
 
         with (
             patch("src.knowledge.graph_engine.GraphEngine", return_value=mock_engine),
-            patch("src.knowledge.extraction.pipeline.ExtractionPipeline", return_value=mock_pipeline),
+            patch(
+                "src.knowledge.extraction.pipeline.ExtractionPipeline", return_value=mock_pipeline
+            ),
         ):
             result = runner.invoke(app, ["graph", "build"])
 
@@ -297,9 +303,12 @@ class TestGraph:
         mock_engine = MagicMock()
         mock_engine.load.return_value = True
         mock_engine.get_stats.return_value = {
-            "entity_count": 100, "edge_count": 200,
-            "connected_components": 5, "graph_path": "/tmp/g.json",
-            "entity_types": {}, "relation_types": {},
+            "entity_count": 100,
+            "edge_count": 200,
+            "connected_components": 5,
+            "graph_path": "/tmp/g.json",
+            "entity_types": {},
+            "relation_types": {},
         }
         mock_engine.prune.return_value = {
             "edges_removed": 10,
@@ -324,9 +333,12 @@ class TestGraph:
         mock_engine = MagicMock()
         mock_engine.load.return_value = True
         mock_engine.get_stats.return_value = {
-            "entity_count": 100, "edge_count": 200,
-            "connected_components": 5, "graph_path": "/tmp/g.json",
-            "entity_types": {}, "relation_types": {},
+            "entity_count": 100,
+            "edge_count": 200,
+            "connected_components": 5,
+            "graph_path": "/tmp/g.json",
+            "entity_types": {},
+            "relation_types": {},
         }
         mock_engine.prune.return_value = {
             "edges_removed": 5,
@@ -358,9 +370,12 @@ class TestGraph:
         mock_engine = MagicMock()
         mock_engine.load.return_value = True
         mock_engine.get_stats.return_value = {
-            "entity_count": 50, "edge_count": 100,
-            "connected_components": 3, "graph_path": "/tmp/g.json",
-            "entity_types": {}, "relation_types": {},
+            "entity_count": 50,
+            "edge_count": 100,
+            "connected_components": 3,
+            "graph_path": "/tmp/g.json",
+            "entity_types": {},
+            "relation_types": {},
         }
         mock_engine.prune.return_value = {
             "edges_removed": 0,
@@ -370,12 +385,18 @@ class TestGraph:
         }
 
         with patch("src.knowledge.graph_engine.GraphEngine", return_value=mock_engine):
-            result = runner.invoke(app, [
-                "graph", "prune",
-                "--min-mentions", "3",
-                "--min-weight", "0.5",
-                "--keep-inferred",
-            ])
+            result = runner.invoke(
+                app,
+                [
+                    "graph",
+                    "prune",
+                    "--min-mentions",
+                    "3",
+                    "--min-weight",
+                    "0.5",
+                    "--keep-inferred",
+                ],
+            )
 
         assert result.exit_code == 0
         mock_engine.prune.assert_called_once_with(
@@ -395,10 +416,273 @@ class TestGraph:
         assert result.exit_code == 0
         assert "graph build" in result.output or "graph prune" in result.output
 
+    def test_graph_aliases_no_graph(self):
+        """graph aliases shows error when no graph built."""
+        mock_engine = MagicMock()
+        mock_engine.load.return_value = False
+
+        with patch("src.knowledge.graph_engine.GraphEngine", return_value=mock_engine):
+            result = runner.invoke(app, ["graph", "aliases"])
+
+        assert result.exit_code == 0
+        assert "No hay Knowledge Graph" in result.output
+
+    def test_graph_aliases_dry_run(self):
+        """graph aliases shows detected pairs in dry-run mode."""
+        mock_engine = MagicMock()
+        mock_engine.load.return_value = True
+        mock_engine._entities = {
+            "tech_fastapi": MagicMock(name="fastapi"),
+            "tech_fast_api": MagicMock(name="fast api"),
+        }
+        mock_engine.deduplicate_aliases.return_value = {
+            "candidates": 1,
+            "merged": 0,
+            "pairs": [("fastapi", "fast api", 0.92)],
+        }
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"embedding": [0.1] * 10}
+        mock_response.raise_for_status = MagicMock()
+
+        mock_http = AsyncMock()
+        mock_http.post = AsyncMock(return_value=mock_response)
+        mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+        mock_http.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("src.knowledge.graph_engine.GraphEngine", return_value=mock_engine),
+            patch("httpx.AsyncClient", return_value=mock_http),
+        ):
+            result = runner.invoke(app, ["graph", "aliases"])
+
+        assert result.exit_code == 0
+        assert "dry-run" in result.output.lower() or "Preview" in result.output
+        assert "1" in result.output  # candidates
+        mock_engine.save.assert_not_called()
+
+    def test_graph_aliases_apply(self):
+        """graph aliases --apply merges detected pairs and saves."""
+        mock_engine = MagicMock()
+        mock_engine.load.return_value = True
+        mock_engine._entities = {
+            "tech_fastapi": MagicMock(name="fastapi"),
+            "tech_fast_api": MagicMock(name="fast api"),
+        }
+        mock_engine.deduplicate_aliases.return_value = {
+            "candidates": 1,
+            "merged": 1,
+            "pairs": [("fastapi", "fast api", 0.92)],
+        }
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"embedding": [0.1] * 10}
+        mock_response.raise_for_status = MagicMock()
+
+        mock_http = AsyncMock()
+        mock_http.post = AsyncMock(return_value=mock_response)
+        mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+        mock_http.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("src.knowledge.graph_engine.GraphEngine", return_value=mock_engine),
+            patch("httpx.AsyncClient", return_value=mock_http),
+        ):
+            result = runner.invoke(app, ["graph", "aliases", "--apply"])
+
+        assert result.exit_code == 0
+        assert "Applied" in result.output or "Deduplication" in result.output
+        mock_engine.save.assert_called_once()
+
+    def test_graph_aliases_no_embeddings(self):
+        """graph aliases shows error when embeddings cannot be generated."""
+        import httpx as httpx_mod
+
+        mock_engine = MagicMock()
+        mock_engine.load.return_value = True
+        mock_engine._entities = {
+            "tech_fastapi": MagicMock(name="fastapi"),
+        }
+
+        mock_http = AsyncMock()
+        mock_http.post = AsyncMock(
+            side_effect=httpx_mod.ConnectError("connection refused"),
+        )
+        mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+        mock_http.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("src.knowledge.graph_engine.GraphEngine", return_value=mock_engine),
+            patch("httpx.AsyncClient", return_value=mock_http),
+        ):
+            result = runner.invoke(app, ["graph", "aliases"])
+
+        assert result.exit_code == 0
+        assert "No se pudieron generar embeddings" in result.output
+
+    def test_graph_aliases_custom_threshold(self):
+        """graph aliases --threshold passes custom threshold to engine."""
+        mock_engine = MagicMock()
+        mock_engine.load.return_value = True
+        mock_engine._entities = {
+            "tech_a": MagicMock(name="a"),
+        }
+        mock_engine.deduplicate_aliases.return_value = {
+            "candidates": 0,
+            "merged": 0,
+            "pairs": [],
+        }
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"embedding": [0.1] * 10}
+        mock_response.raise_for_status = MagicMock()
+
+        mock_http = AsyncMock()
+        mock_http.post = AsyncMock(return_value=mock_response)
+        mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+        mock_http.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("src.knowledge.graph_engine.GraphEngine", return_value=mock_engine),
+            patch("httpx.AsyncClient", return_value=mock_http),
+        ):
+            result = runner.invoke(app, ["graph", "aliases", "--threshold", "0.90"])
+
+        assert result.exit_code == 0
+        mock_engine.deduplicate_aliases.assert_called_once_with(
+            ANY,
+            threshold=0.90,
+            dry_run=True,
+        )
+
+    def test_graph_aliases_empty_graph(self):
+        """graph aliases shows message when graph has no entities."""
+        mock_engine = MagicMock()
+        mock_engine.load.return_value = True
+        mock_engine._entities = {}
+
+        with patch("src.knowledge.graph_engine.GraphEngine", return_value=mock_engine):
+            result = runner.invoke(app, ["graph", "aliases"])
+
+        assert result.exit_code == 0
+        assert "no tiene entidades" in result.output
+
+
+# ===================================================================
+# TestGraphDrift
+# ===================================================================
+
+
+class TestGraphDrift:
+    """Tests for the ``graph drift`` CLI action."""
+
+    def test_graph_drift_no_graph(self):
+        """graph drift shows message when no graph exists."""
+        mock_engine = MagicMock()
+        mock_engine.load.return_value = False
+
+        with patch("src.knowledge.graph_engine.GraphEngine", return_value=mock_engine):
+            result = runner.invoke(app, ["graph", "drift"])
+
+        assert result.exit_code == 0
+        assert "No hay Knowledge Graph" in result.output
+
+    def test_graph_drift_dry_run_no_drift(self):
+        """graph drift --dry-run shows no drift message."""
+        mock_engine = MagicMock()
+        mock_engine.load.return_value = True
+        mock_engine.detect_drift.return_value = []
+
+        with patch("src.knowledge.graph_engine.GraphEngine", return_value=mock_engine):
+            result = runner.invoke(app, ["graph", "drift", "--dry-run"])
+
+        assert result.exit_code == 0
+        assert "No semantic drift" in result.output
+
+    def test_graph_drift_dry_run_with_events(self):
+        """graph drift --dry-run shows drift table when events exist."""
+        from src.knowledge.graph_engine import DriftEvent
+
+        mock_engine = MagicMock()
+        mock_engine.load.return_value = True
+        mock_engine.detect_drift.return_value = [
+            DriftEvent(
+                entity_id="abc",
+                entity_name="python",
+                entity_type="technology",
+                jaccard_similarity=0.33,
+                old_neighbors=["fastapi"],
+                new_neighbors=["django"],
+                added=["django"],
+                removed=["fastapi"],
+            )
+        ]
+
+        with patch("src.knowledge.graph_engine.GraphEngine", return_value=mock_engine):
+            result = runner.invoke(app, ["graph", "drift", "--dry-run"])
+
+        assert result.exit_code == 0
+        assert "python" in result.output
+        assert "django" in result.output
+
+    def test_graph_drift_log_history(self):
+        """graph drift (no dry-run) shows drift log history."""
+        mock_engine = MagicMock()
+        mock_engine.load.return_value = True
+        mock_engine.load_drift_log.return_value = [
+            {
+                "entity_name": "python",
+                "jaccard_similarity": 0.2,
+                "added": ["django"],
+                "removed": ["fastapi"],
+                "timestamp": "2026-02-26T10:00:00",
+            }
+        ]
+
+        with patch("src.knowledge.graph_engine.GraphEngine", return_value=mock_engine):
+            result = runner.invoke(app, ["graph", "drift"])
+
+        assert result.exit_code == 0
+        assert "python" in result.output
+        assert "Drift Log" in result.output
+
+    def test_graph_drift_log_empty(self):
+        """graph drift shows message when no events in log."""
+        mock_engine = MagicMock()
+        mock_engine.load.return_value = True
+        mock_engine.load_drift_log.return_value = []
+
+        with patch("src.knowledge.graph_engine.GraphEngine", return_value=mock_engine):
+            result = runner.invoke(app, ["graph", "drift"])
+
+        assert result.exit_code == 0
+        assert "No drift events" in result.output
+
+    def test_graph_drift_filter_by_entity(self):
+        """graph drift --query filters by entity name."""
+        mock_engine = MagicMock()
+        mock_engine.load.return_value = True
+        mock_engine.load_drift_log.return_value = [
+            {
+                "entity_name": "python",
+                "jaccard_similarity": 0.2,
+                "added": [],
+                "removed": [],
+                "timestamp": "2026-02-26T10:00:00",
+            }
+        ]
+
+        with patch("src.knowledge.graph_engine.GraphEngine", return_value=mock_engine):
+            result = runner.invoke(app, ["graph", "drift", "-q", "python"])
+
+        assert result.exit_code == 0
+        mock_engine.load_drift_log.assert_called_once_with(entity_name="python")
+
 
 # ===================================================================
 # TestLearn
 # ===================================================================
+
 
 class TestLearn:
     """Tests for the ``learn`` command."""
@@ -487,10 +771,24 @@ class TestLearn:
         assert result.exit_code == 0
         assert "Nada que resetear" in result.output
 
+    def test_learn_watch_displays_start_message(self):
+        """fabrik learn watch shows startup message before entering loop."""
+
+        def mock_run(coro):
+            coro.close()  # Properly close coroutine to avoid RuntimeWarning
+
+        with patch("src.interfaces.cli.asyncio") as mock_asyncio:
+            mock_asyncio.run = mock_run
+            mock_asyncio.Event = asyncio.Event
+            result = runner.invoke(app, ["learn", "watch", "--interval", "5"])
+        assert result.exit_code == 0
+        assert "Watching sessions every 5s" in result.output
+
 
 # ===================================================================
 # TestRag
 # ===================================================================
+
 
 class TestRag:
     """Tests for the ``rag`` command."""
@@ -514,11 +812,13 @@ class TestRag:
     def test_rag_index(self):
         """rag index shows indexing results."""
         mock_engine = MagicMock()
-        mock_engine.index_datalake = AsyncMock(return_value={
-            "files_indexed": 50,
-            "chunks_created": 300,
-            "errors": 2,
-        })
+        mock_engine.index_datalake = AsyncMock(
+            return_value={
+                "files_indexed": 50,
+                "chunks_created": 300,
+                "errors": 2,
+            }
+        )
         mock_engine = _make_async_context_manager(mock_engine)
 
         with patch("src.knowledge.rag.RAGEngine", return_value=mock_engine):
@@ -532,10 +832,12 @@ class TestRag:
     def test_rag_search_with_results(self):
         """rag search -q shows matching documents."""
         mock_engine = MagicMock()
-        mock_engine.retrieve = AsyncMock(return_value=[
-            {"category": "debugging", "score": 0.951, "text": "Fix timeout error in API " * 20},
-            {"category": "testing", "score": 0.852, "text": "Unit test for login flow " * 20},
-        ])
+        mock_engine.retrieve = AsyncMock(
+            return_value=[
+                {"category": "debugging", "score": 0.951, "text": "Fix timeout error in API " * 20},
+                {"category": "testing", "score": 0.852, "text": "Unit test for login flow " * 20},
+            ]
+        )
         mock_engine = _make_async_context_manager(mock_engine)
 
         with patch("src.knowledge.rag.RAGEngine", return_value=mock_engine):
@@ -562,18 +864,21 @@ class TestRag:
 # TestDatalake
 # ===================================================================
 
+
 class TestDatalake:
     """Tests for the ``datalake`` command."""
 
     def test_datalake_stats(self):
         """datalake stats shows datalake statistics."""
         mock_connector = MagicMock()
-        mock_connector.get_stats = AsyncMock(return_value={
-            "total_files": 800,
-            "total_size_mb": 45.50,
-            "by_datalake": {"fabrik-codek-datalake": 800},
-            "by_category": {"training_data": 500, "code_change": 300},
-        })
+        mock_connector.get_stats = AsyncMock(
+            return_value={
+                "total_files": 800,
+                "total_size_mb": 45.50,
+                "by_datalake": {"fabrik-codek-datalake": 800},
+                "by_category": {"training_data": 500, "code_change": 300},
+            }
+        )
 
         with patch("src.knowledge.DatalakeConnector", return_value=mock_connector):
             result = runner.invoke(app, ["datalake", "stats"])
@@ -643,17 +948,20 @@ class TestDatalake:
 # TestFlywheel
 # ===================================================================
 
+
 class TestFlywheel:
     """Tests for the ``flywheel`` command."""
 
     def test_flywheel_stats(self):
         """flywheel stats shows flywheel status."""
         mock_collector = MagicMock()
-        mock_collector.get_session_stats = AsyncMock(return_value={
-            "enabled": True,
-            "session_id": "abc12345-6789-0000-1111-222233334444",
-            "buffered_records": 3,
-        })
+        mock_collector.get_session_stats = AsyncMock(
+            return_value={
+                "enabled": True,
+                "session_id": "abc12345-6789-0000-1111-222233334444",
+                "buffered_records": 3,
+            }
+        )
 
         with patch("src.flywheel.get_collector", return_value=mock_collector):
             result = runner.invoke(app, ["flywheel", "stats"])
@@ -666,9 +974,7 @@ class TestFlywheel:
     def test_flywheel_export(self):
         """flywheel export shows export path."""
         mock_collector = MagicMock()
-        mock_collector.export_training_pairs = AsyncMock(
-            return_value="/tmp/training_export.jsonl"
-        )
+        mock_collector.export_training_pairs = AsyncMock(return_value="/tmp/training_export.jsonl")
 
         with patch("src.flywheel.get_collector", return_value=mock_collector):
             result = runner.invoke(app, ["flywheel", "export"])
@@ -692,15 +998,19 @@ class TestFlywheel:
 # TestAsk
 # ===================================================================
 
+
 class TestAsk:
     """Tests for the ``ask`` command."""
 
-    def _run_ask(self, args, *, content="mock response", tokens_used=42,
-                 latency_ms=100.0, model="qwen2.5-coder:7b"):
+    def _run_ask(
+        self, args, *, content="mock response", tokens_used=42, latency_ms=100.0, model="qwen2.5-coder:7b"
+    ):
         """Helper to invoke ``ask`` with controlled mocks."""
         mock_resp = _make_llm_response(
-            content=content, tokens_used=tokens_used,
-            latency_ms=latency_ms, model=model,
+            content=content,
+            tokens_used=tokens_used,
+            latency_ms=latency_ms,
+            model=model,
         )
 
         mock_client = MagicMock()
@@ -732,7 +1042,9 @@ class TestAsk:
         """ask output includes token count and latency."""
         result, _, _ = self._run_ask(
             ["ask", "test prompt"],
-            content="done", tokens_used=150, latency_ms=250.5,
+            content="done",
+            tokens_used=150,
+            latency_ms=250.5,
         )
         assert result.exit_code == 0
         assert "150 tokens" in result.output
@@ -764,9 +1076,7 @@ class TestAsk:
             patch("src.core.LLMClient", return_value=mock_client) as cls,
             patch("src.flywheel.get_collector", return_value=mock_collector),
         ):
-            result = runner.invoke(
-                app, ["ask", "Hello", "--model", "qwen2.5-coder:7b"]
-            )
+            result = runner.invoke(app, ["ask", "Hello", "--model", "qwen2.5-coder:7b"])
 
         assert result.exit_code == 0
         cls.assert_called_once_with(model="qwen2.5-coder:7b")
@@ -775,6 +1085,7 @@ class TestAsk:
 # ===================================================================
 # TestFinetune
 # ===================================================================
+
 
 class TestFinetune:
     """Tests for the ``finetune`` command."""
@@ -831,9 +1142,7 @@ class TestFinetune:
     @patch("subprocess.run")
     def test_finetune_with_max_samples(self, mock_subprocess):
         """finetune --max-samples passes limit to subprocess."""
-        result = runner.invoke(
-            app, ["finetune", "--epochs", "1", "--max-samples", "100"]
-        )
+        result = runner.invoke(app, ["finetune", "--epochs", "1", "--max-samples", "100"])
 
         assert result.exit_code == 0
         cmd = mock_subprocess.call_args[0][0]
@@ -844,6 +1153,7 @@ class TestFinetune:
 # ===================================================================
 # TestInit
 # ===================================================================
+
 
 class TestInit:
     """Tests for the ``init`` command."""
@@ -883,7 +1193,7 @@ class TestInit:
             mock_path_cls.return_value = mock_path_cls
 
             # Simpler approach: patch at module level
-            with patch.object(Path, '__new__', wraps=Path.__new__):
+            with patch.object(Path, "__new__", wraps=Path.__new__):
                 result = runner.invoke(app, ["init", "--skip-models"])
 
         assert result.exit_code == 0
@@ -926,6 +1236,7 @@ class TestInit:
 # TestMCP
 # ===================================================================
 
+
 class TestMCP:
     """Tests for the ``mcp`` command."""
 
@@ -945,6 +1256,7 @@ class TestMCP:
 # ===================================================================
 # TestFulltext
 # ===================================================================
+
 
 class TestFulltext:
     """Tests for the ``fulltext`` command."""
@@ -1000,9 +1312,17 @@ class TestFulltext:
         """fulltext search returns results."""
         mock_ft = MagicMock()
         mock_ft.health_check = AsyncMock(return_value=True)
-        mock_ft.search = AsyncMock(return_value=[
-            {"text": "match here", "source": "s.jsonl", "category": "training", "score": 1.0, "origin": "fulltext"},
-        ])
+        mock_ft.search = AsyncMock(
+            return_value=[
+                {
+                    "text": "match here",
+                    "source": "s.jsonl",
+                    "category": "training",
+                    "score": 1.0,
+                    "origin": "fulltext",
+                },
+            ]
+        )
         mock_ft.close = AsyncMock()
         mock_ft.__aenter__ = AsyncMock(return_value=mock_ft)
         mock_ft.__aexit__ = AsyncMock(return_value=None)
@@ -1022,12 +1342,13 @@ class TestFulltext:
 # TestProfile
 # ===================================================================
 
+
 class TestProfile:
     """Tests for the ``profile`` command."""
 
     def test_profile_show_no_profile(self):
         """profile show when no profile exists."""
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock, patch
 
         mock_settings = MagicMock()
         mock_settings.data_dir = Path("/tmp/nonexistent-fabrik-test-dir")
@@ -1041,14 +1362,24 @@ class TestProfile:
     def test_profile_build(self, tmp_path):
         """profile build creates profile from datalake."""
         import json
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock, patch
 
         # Create sample datalake
         tp_dir = tmp_path / "02-processed" / "training-pairs"
         tp_dir.mkdir(parents=True)
         pairs = [
-            {"instruction": "test q", "output": "test a", "category": "testing", "tags": ["testing"]},
-            {"instruction": "debug q", "output": "debug a", "category": "debugging", "tags": ["debugging"]},
+            {
+                "instruction": "test q",
+                "output": "test a",
+                "category": "testing",
+                "tags": ["testing"],
+            },
+            {
+                "instruction": "debug q",
+                "output": "debug a",
+                "category": "debugging",
+                "tags": ["debugging"],
+            },
         ]
         (tp_dir / "test.jsonl").write_text("\n".join(json.dumps(p) for p in pairs))
 
@@ -1067,12 +1398,14 @@ class TestProfile:
 # TestCompetenceCLI
 # ===================================================================
 
+
 class TestCompetenceCLI:
     """Tests for the ``competence`` command."""
 
     def test_load_nonexistent_returns_empty(self, tmp_path):
         """load_competence_map on nonexistent returns empty CompetenceMap."""
         from src.core.competence_model import load_competence_map
+
         result = load_competence_map(tmp_path / "missing.json")
         assert result.topics == []
         assert result.total_topics == 0
@@ -1085,13 +1418,16 @@ class TestCompetenceCLI:
         tp_dir = tmp_path / "02-processed" / "training-pairs"
         tp_dir.mkdir(parents=True)
         import json
+
         with open(tp_dir / "python_data.jsonl", "w") as f:
             for i in range(10):
-                f.write(json.dumps({"input": f"q{i}", "output": f"a{i}", "category": "python"}) + "\n")
+                f.write(
+                    json.dumps({"input": f"q{i}", "output": f"a{i}", "category": "python"}) + "\n"
+                )
 
         output = tmp_path / "competence_map.json"
         builder = CompetenceBuilder(datalake_path=tmp_path)
-        result = builder.build(output_path=output)
+        builder.build(output_path=output)
 
         assert output.exists()
         loaded = load_competence_map(output)

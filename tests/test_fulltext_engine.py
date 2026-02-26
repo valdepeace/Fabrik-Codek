@@ -8,7 +8,6 @@ import pytest
 from src.config import settings
 from src.knowledge.fulltext_engine import FullTextEngine
 
-
 # ---------------------------------------------------------------------------
 # Config tests
 # ---------------------------------------------------------------------------
@@ -92,7 +91,9 @@ class TestFullTextHealthCheck:
     @pytest.mark.asyncio
     async def test_health_timeout(self, engine):
         with pytest.MonkeyPatch.context() as mp:
-            mp.setattr(engine._client, "get", AsyncMock(side_effect=httpx.TimeoutException("timeout")))
+            mp.setattr(
+                engine._client, "get", AsyncMock(side_effect=httpx.TimeoutException("timeout"))
+            )
             result = await engine.health_check()
             assert result is False
 
@@ -109,10 +110,18 @@ class TestFullTextSearch:
     async def test_search_returns_results(self, engine):
         meili_response = {
             "hits": [
-                {"id": "doc1", "text": "FastAPI uses Pydantic", "source": "training.jsonl",
-                 "category": "training"},
-                {"id": "doc2", "text": "Retry with backoff", "source": "errors.jsonl",
-                 "category": "learning"},
+                {
+                    "id": "doc1",
+                    "text": "FastAPI uses Pydantic",
+                    "source": "training.jsonl",
+                    "category": "training",
+                },
+                {
+                    "id": "doc2",
+                    "text": "Retry with backoff",
+                    "source": "errors.jsonl",
+                    "category": "learning",
+                },
             ],
             "estimatedTotalHits": 2,
             "processingTimeMs": 1,
@@ -216,7 +225,9 @@ class TestFullTextIndexing:
     async def test_index_documents_connection_error(self, engine):
         with pytest.MonkeyPatch.context() as mp:
             mp.setattr(engine._client, "post", AsyncMock(side_effect=httpx.ConnectError("refused")))
-            count = await engine.index_documents([{"id": "1", "text": "t", "source": "s", "category": "c"}])
+            count = await engine.index_documents(
+                [{"id": "1", "text": "t", "source": "s", "category": "c"}]
+            )
             assert count == 0
 
     @pytest.mark.asyncio
@@ -227,7 +238,9 @@ class TestFullTextIndexing:
 
         with pytest.MonkeyPatch.context() as mp:
             mp.setattr(engine._client, "post", AsyncMock(return_value=mock_resp))
-            count = await engine.index_documents([{"id": "1", "text": "t", "source": "s", "category": "c"}])
+            count = await engine.index_documents(
+                [{"id": "1", "text": "t", "source": "s", "category": "c"}]
+            )
             assert count == 0
 
 

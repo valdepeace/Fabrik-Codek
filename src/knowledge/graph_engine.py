@@ -1,8 +1,10 @@
 """Knowledge Graph Engine - NetworkX-based graph with persistence."""
 
 import json
+import math
 from collections import defaultdict
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 import networkx as nx
@@ -22,6 +24,59 @@ logger = structlog.get_logger()
 
 TRANSITIVE_RELATIONS = [RelationType.DEPENDS_ON, RelationType.PART_OF]
 INFERRED_CONFIDENCE = 0.3
+
+
+@dataclass
+class DriftEvent:
+    """A detected semantic drift event for an entity."""
+
+    entity_id: str
+    entity_name: str
+    entity_type: str
+    jaccard_similarity: float
+    old_neighbors: list[str]
+    new_neighbors: list[str]
+    added: list[str]
+    removed: list[str]
+    timestamp: str = ""
+
+    def __post_init__(self):
+        if not self.timestamp:
+            self.timestamp = datetime.now(tz=UTC).isoformat()
+
+    def to_dict(self) -> dict:
+        return {
+            "entity_id": self.entity_id,
+            "entity_name": self.entity_name,
+            "entity_type": self.entity_type,
+            "jaccard_similarity": round(self.jaccard_similarity, 4),
+            "old_neighbors": self.old_neighbors,
+            "new_neighbors": self.new_neighbors,
+            "added": self.added,
+            "removed": self.removed,
+            "timestamp": self.timestamp,
+        }
+
+
+@dataclass
+class AliasPair:
+    """A pair of entities detected as likely aliases."""
+
+    canonical: Entity  # Keep this one (higher mention_count)
+    alias: Entity  # Merge into canonical
+    similarity: float  # Cosine similarity score
+
+
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    """Compute cosine similarity between two vectors without numpy."""
+    if len(a) != len(b):
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(x * x for x in b))
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return dot / (norm_a * norm_b)
 
 
 class GraphEngine:
@@ -49,7 +104,7 @@ class GraphEngine:
 
     def add_entity(self, entity: Entity) -> Entity:
         """Add or merge an entity into the graph."""
-        now_iso = datetime.now(tz=timezone.utc).isoformat()
+        now_iso = datetime.now(tz=UTC).isoformat()
         existing = self._entities.get(entity.id)
         if existing:
             # Merge: combine source_docs, aliases, increment count
@@ -67,6 +122,8 @@ class GraphEngine:
             return existing
 
         entity.metadata["last_seen"] = now_iso
+        entity.metadata.setdefault("created_at", now_iso)
+        entity.metadata.setdefault("version", 1)
         self._entities[entity.id] = entity
         self._graph.add_node(entity.id, **entity.to_dict())
         return entity
@@ -112,7 +169,7 @@ class GraphEngine:
         if relation.source_id not in self._entities or relation.target_id not in self._entities:
             return
 
-        now_iso = datetime.now(tz=timezone.utc).isoformat()
+        now_iso = datetime.now(tz=UTC).isoformat()
         edge_key = (relation.source_id, relation.target_id)
         if self._graph.has_edge(*edge_key):
             edge_data = self._graph.edges[edge_key]
@@ -169,21 +226,25 @@ class GraphEngine:
         """Ingest a triple, creating/merging entities and adding relation."""
         # Create/get subject entity
         subj_id = make_entity_id(triple.subject_type.value, triple.subject_name)
-        subject = self.add_entity(Entity(
-            id=subj_id,
-            name=triple.subject_name.strip().lower(),
-            entity_type=triple.subject_type,
-            source_docs=[triple.source_doc] if triple.source_doc else [],
-        ))
+        subject = self.add_entity(
+            Entity(
+                id=subj_id,
+                name=triple.subject_name.strip().lower(),
+                entity_type=triple.subject_type,
+                source_docs=[triple.source_doc] if triple.source_doc else [],
+            )
+        )
 
         # Create/get object entity
         obj_id = make_entity_id(triple.object_type.value, triple.object_name)
-        obj = self.add_entity(Entity(
-            id=obj_id,
-            name=triple.object_name.strip().lower(),
-            entity_type=triple.object_type,
-            source_docs=[triple.source_doc] if triple.source_doc else [],
-        ))
+        obj = self.add_entity(
+            Entity(
+                id=obj_id,
+                name=triple.object_name.strip().lower(),
+                entity_type=triple.object_type,
+                source_docs=[triple.source_doc] if triple.source_doc else [],
+            )
+        )
 
         # Create relation
         relation = Relation(
@@ -276,7 +337,7 @@ class GraphEngine:
         """Get readable relationship paths between entities for context injection."""
         paths = []
         for i, src_id in enumerate(entity_ids):
-            for tgt_id in entity_ids[i + 1:]:
+            for tgt_id in entity_ids[i + 1 :]:
                 src = self._entities.get(src_id)
                 tgt = self._entities.get(tgt_id)
                 if not src or not tgt:
@@ -297,9 +358,7 @@ class GraphEngine:
                         undirected = self._graph.to_undirected()
                         path = nx.shortest_path(undirected, src_id, tgt_id)
                         if len(path) <= 4:
-                            names = [
-                                self._entities[n].name for n in path if n in self._entities
-                            ]
+                            names = [self._entities[n].name for n in path if n in self._entities]
                             paths.append(" -> ".join(names))
                     except (nx.NetworkXNoPath, nx.NodeNotFound):
                         pass
@@ -430,7 +489,11 @@ class GraphEngine:
             for src, tgt in edges_to_remove
         ]
         removed_entities_info = [
-            {"id": eid, "name": self._entities[eid].name, "type": self._entities[eid].entity_type.value}
+            {
+                "id": eid,
+                "name": self._entities[eid].name,
+                "type": self._entities[eid].entity_type.value,
+            }
             for eid in entities_to_remove
         ]
 
@@ -479,7 +542,7 @@ class GraphEngine:
         Returns:
             Stats dict with edges_decayed, edges_skipped, min/max weight.
         """
-        ref = reference_time or datetime.now(tz=timezone.utc)
+        ref = reference_time or datetime.now(tz=UTC)
         edges_decayed = 0
         edges_skipped = 0
         min_weight = float("inf")
@@ -517,6 +580,244 @@ class GraphEngine:
             "min_weight_after": round(min_weight, 6),
             "max_weight_after": round(max_weight, 6),
         }
+
+    # --- Alias Detection ---
+
+    def detect_aliases(
+        self,
+        embeddings: dict[str, list[float]],
+        threshold: float = 0.85,
+    ) -> list[AliasPair]:
+        """Detect entity pairs that are likely aliases based on embedding similarity.
+
+        Only compares entities of the same type. The entity with higher
+        mention_count is treated as canonical.
+        """
+        by_type: dict[EntityType, list[Entity]] = defaultdict(list)
+        for entity in self._entities.values():
+            if entity.id in embeddings:
+                by_type[entity.entity_type].append(entity)
+
+        pairs: list[AliasPair] = []
+        for group in by_type.values():
+            for i, a in enumerate(group):
+                for j in range(i + 1, len(group)):
+                    b = group[j]
+                    sim = _cosine_similarity(embeddings[a.id], embeddings[b.id])
+                    if sim >= threshold:
+                        if a.mention_count >= b.mention_count:
+                            canonical, alias = a, b
+                        else:
+                            canonical, alias = b, a
+                        pairs.append(
+                            AliasPair(
+                                canonical=canonical,
+                                alias=alias,
+                                similarity=sim,
+                            )
+                        )
+
+        pairs.sort(key=lambda p: p.similarity, reverse=True)
+        return pairs
+
+    def merge_alias_pair(self, pair: AliasPair) -> None:
+        """Merge alias entity into canonical entity.
+
+        Accumulates aliases, mention_count, source_docs. Redirects all edges
+        from the alias to the canonical. Removes the alias from the graph.
+        """
+        canonical = self._entities.get(pair.canonical.id)
+        alias = self._entities.get(pair.alias.id)
+        if not canonical or not alias:
+            return
+
+        # Accumulate fields
+        if alias.name not in canonical.aliases and alias.name != canonical.name:
+            canonical.aliases.append(alias.name)
+        for a in alias.aliases:
+            if a not in canonical.aliases and a != canonical.name:
+                canonical.aliases.append(a)
+        canonical.mention_count += alias.mention_count
+        for doc in alias.source_docs:
+            if doc not in canonical.source_docs:
+                canonical.source_docs.append(doc)
+        if alias.description and not canonical.description:
+            canonical.description = alias.description
+
+        # Redirect edges
+        if self._graph.has_node(alias.id):
+            for predecessor in list(self._graph.predecessors(alias.id)):
+                if predecessor != canonical.id:
+                    edge_data = dict(self._graph.edges[predecessor, alias.id])
+                    if not self._graph.has_edge(predecessor, canonical.id):
+                        self._graph.add_edge(predecessor, canonical.id, **edge_data)
+            for successor in list(self._graph.successors(alias.id)):
+                if successor != canonical.id:
+                    edge_data = dict(self._graph.edges[alias.id, successor])
+                    if not self._graph.has_edge(canonical.id, successor):
+                        self._graph.add_edge(canonical.id, successor, **edge_data)
+            self._graph.remove_node(alias.id)
+
+        # Remove from entities dict
+        del self._entities[alias.id]
+
+        # Update canonical in graph
+        self._graph.nodes[canonical.id].update(canonical.to_dict())
+
+    def deduplicate_aliases(
+        self,
+        embeddings: dict[str, list[float]],
+        threshold: float = 0.85,
+        dry_run: bool = True,
+    ) -> dict:
+        """Detect and optionally merge alias entities.
+
+        Returns stats dict with candidates found and merges applied.
+        """
+        pairs = self.detect_aliases(embeddings, threshold)
+
+        stats = {
+            "candidates": len(pairs),
+            "merged": 0,
+            "pairs": [(p.canonical.name, p.alias.name, p.similarity) for p in pairs],
+        }
+
+        if dry_run:
+            return stats
+
+        for pair in pairs:
+            # Skip if alias was already merged in a previous iteration
+            if pair.alias.id not in self._entities:
+                continue
+            self.merge_alias_pair(pair)
+            stats["merged"] += 1
+
+        if stats["merged"] > 0:
+            logger.info(
+                "aliases_deduplicated",
+                candidates=stats["candidates"],
+                merged=stats["merged"],
+            )
+
+        return stats
+
+    # --- Semantic Drift Detection ---
+
+    def _get_neighbor_set(self, entity_id: str) -> set[str]:
+        """Get the set of neighbor names (both directions) for an entity."""
+        neighbors: set[str] = set()
+        if entity_id not in self._graph:
+            return neighbors
+        for succ in self._graph.successors(entity_id):
+            ent = self._entities.get(succ)
+            if ent:
+                neighbors.add(ent.name)
+        for pred in self._graph.predecessors(entity_id):
+            ent = self._entities.get(pred)
+            if ent:
+                neighbors.add(ent.name)
+        return neighbors
+
+    def snapshot_neighborhoods(self) -> int:
+        """Store current neighbor set in each entity's metadata.
+
+        Compares with previous snapshot and increments version if changed.
+        Returns number of entities whose context changed.
+        """
+        changed = 0
+        for entity in self._entities.values():
+            current = sorted(self._get_neighbor_set(entity.id))
+            previous = entity.metadata.get("neighbor_snapshot", [])
+            if current != previous:
+                if previous:  # Only count as change if there was a prior snapshot
+                    entity.metadata["version"] = entity.metadata.get("version", 1) + 1
+                    changed += 1
+                entity.metadata["neighbor_snapshot"] = current
+            # Update graph node
+            self._graph.nodes[entity.id]["metadata"] = entity.metadata
+        return changed
+
+    def detect_drift(self, threshold: float = 0.7) -> list[DriftEvent]:
+        """Detect entities whose neighborhood changed beyond threshold.
+
+        Compares current neighbor set against stored snapshot using Jaccard
+        similarity. Entities without a previous snapshot are skipped.
+
+        Args:
+            threshold: Jaccard similarity below this triggers drift event.
+
+        Returns:
+            List of DriftEvent for entities with significant context change.
+        """
+        events: list[DriftEvent] = []
+        for entity in self._entities.values():
+            old_snapshot = entity.metadata.get("neighbor_snapshot", [])
+            if not old_snapshot:
+                continue  # No previous snapshot — skip
+
+            current = sorted(self._get_neighbor_set(entity.id))
+            old_set = set(old_snapshot)
+            new_set = set(current)
+
+            # Skip isolated entities (no neighbors then or now)
+            if not old_set and not new_set:
+                continue
+
+            # Jaccard similarity
+            intersection = old_set & new_set
+            union = old_set | new_set
+            jaccard = len(intersection) / len(union) if union else 1.0
+
+            if jaccard < threshold:
+                events.append(
+                    DriftEvent(
+                        entity_id=entity.id,
+                        entity_name=entity.name,
+                        entity_type=entity.entity_type.value,
+                        jaccard_similarity=jaccard,
+                        old_neighbors=sorted(old_set),
+                        new_neighbors=sorted(new_set),
+                        added=sorted(new_set - old_set),
+                        removed=sorted(old_set - new_set),
+                    )
+                )
+
+        events.sort(key=lambda e: e.jaccard_similarity)
+        return events
+
+    def persist_drift_events(self, events: list[DriftEvent]) -> Path:
+        """Append drift events to JSONL log file.
+
+        Returns path to the log file.
+        """
+        log_path = self.data_dir / "drift_log.jsonl"
+        with open(log_path, "a", encoding="utf-8") as f:
+            for event in events:
+                f.write(json.dumps(event.to_dict(), ensure_ascii=False) + "\n")
+        if events:
+            logger.info("drift_events_persisted", count=len(events), path=str(log_path))
+        return log_path
+
+    def load_drift_log(self, entity_name: str | None = None) -> list[dict]:
+        """Load drift log entries, optionally filtered by entity name."""
+        log_path = self.data_dir / "drift_log.jsonl"
+        if not log_path.exists():
+            return []
+
+        entries = []
+        with open(log_path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                    if entity_name and entry.get("entity_name") != entity_name:
+                        continue
+                    entries.append(entry)
+                except json.JSONDecodeError:
+                    continue
+        return entries
 
     # --- Persistence ---
 
@@ -578,9 +879,9 @@ class GraphEngine:
             "edge_count": self._graph.number_of_edges(),
             "entity_types": dict(self._count_entity_types()),
             "relation_types": dict(self._count_relation_types()),
-            "connected_components": nx.number_weakly_connected_components(self._graph)
-            if len(self._graph) > 0
-            else 0,
+            "connected_components": (
+                nx.number_weakly_connected_components(self._graph) if len(self._graph) > 0 else 0
+            ),
             "graph_path": str(self.graph_path),
             "graph_exists": self.graph_path.exists(),
         }

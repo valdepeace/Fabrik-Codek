@@ -138,7 +138,10 @@ FILE_EXT_TO_TECH: dict[str, str] = {
 }
 
 KNOWN_STRATEGIES: list[tuple[str, re.Pattern]] = [
-    ("retry with backoff", re.compile(r"retry.*backoff|exponential\s*backoff|backoff.*retry", re.I)),
+    (
+        "retry with backoff",
+        re.compile(r"retry.*backoff|exponential\s*backoff|backoff.*retry", re.I),
+    ),
     ("early stopping", re.compile(r"early\s*stop(?:ping)?", re.I)),
     ("caching", re.compile(r"cach(?:e|ing)\s*(?:strategy|layer|response)", re.I)),
     ("lazy loading", re.compile(r"lazy\s*load(?:ing)?", re.I)),
@@ -190,10 +193,16 @@ class HeuristicExtractor:
         triples.extend(found_strategies)
 
         # 6. Co-occurrence relations between technologies
-        tech_names = [t.subject_name for t in found_techs if t.subject_type == EntityType.TECHNOLOGY]
-        triples.extend(self._create_cooccurrence_relations(
-            tech_names, EntityType.TECHNOLOGY, source_doc,
-        ))
+        tech_names = [
+            t.subject_name for t in found_techs if t.subject_type == EntityType.TECHNOLOGY
+        ]
+        triples.extend(
+            self._create_cooccurrence_relations(
+                tech_names,
+                EntityType.TECHNOLOGY,
+                source_doc,
+            )
+        )
 
         return triples
 
@@ -206,15 +215,17 @@ class HeuristicExtractor:
 
         # Find technologies mentioned and link to category
         for tech_name in self._find_technologies(text):
-            triples.append(Triple(
-                subject_name=tech_name,
-                subject_type=EntityType.TECHNOLOGY,
-                relation_type=RelationType.RELATED_TO,
-                object_name=cat_name,
-                object_type=EntityType.CATEGORY,
-                source_doc=source_doc,
-                confidence=0.6,
-            ))
+            triples.append(
+                Triple(
+                    subject_name=tech_name,
+                    subject_type=EntityType.TECHNOLOGY,
+                    relation_type=RelationType.RELATED_TO,
+                    object_name=cat_name,
+                    object_type=EntityType.CATEGORY,
+                    source_doc=source_doc,
+                    confidence=0.6,
+                )
+            )
 
         return triples
 
@@ -224,15 +235,17 @@ class HeuristicExtractor:
         found = self._find_technologies(text)
 
         for tech_name in found:
-            triples.append(Triple(
-                subject_name=tech_name,
-                subject_type=EntityType.TECHNOLOGY,
-                relation_type=RelationType.RELATED_TO,
-                object_name=tech_name,
-                object_type=EntityType.TECHNOLOGY,
-                source_doc=source_doc,
-                confidence=0.8,
-            ))
+            triples.append(
+                Triple(
+                    subject_name=tech_name,
+                    subject_type=EntityType.TECHNOLOGY,
+                    relation_type=RelationType.RELATED_TO,
+                    object_name=tech_name,
+                    object_type=EntityType.TECHNOLOGY,
+                    source_doc=source_doc,
+                    confidence=0.8,
+                )
+            )
 
         return triples
 
@@ -245,15 +258,17 @@ class HeuristicExtractor:
             all_names = [pattern_name] + aliases
             for name in all_names:
                 if name.lower() in text_lower:
-                    triples.append(Triple(
-                        subject_name=pattern_name,
-                        subject_type=EntityType.PATTERN,
-                        relation_type=RelationType.RELATED_TO,
-                        object_name=pattern_name,
-                        object_type=EntityType.PATTERN,
-                        source_doc=source_doc,
-                        confidence=0.7,
-                    ))
+                    triples.append(
+                        Triple(
+                            subject_name=pattern_name,
+                            subject_type=EntityType.PATTERN,
+                            relation_type=RelationType.RELATED_TO,
+                            object_name=pattern_name,
+                            object_type=EntityType.PATTERN,
+                            source_doc=source_doc,
+                            confidence=0.7,
+                        )
+                    )
                     break
 
         return triples
@@ -266,29 +281,33 @@ class HeuristicExtractor:
         for error_name, pattern in KNOWN_ERROR_PATTERNS:
             if pattern.search(text):
                 found_errors.append(error_name)
-                triples.append(Triple(
-                    subject_name=error_name,
-                    subject_type=EntityType.ERROR_TYPE,
-                    relation_type=RelationType.RELATED_TO,
-                    object_name=error_name,
-                    object_type=EntityType.ERROR_TYPE,
-                    source_doc=source_doc,
-                    confidence=0.7,
-                ))
+                triples.append(
+                    Triple(
+                        subject_name=error_name,
+                        subject_type=EntityType.ERROR_TYPE,
+                        relation_type=RelationType.RELATED_TO,
+                        object_name=error_name,
+                        object_type=EntityType.ERROR_TYPE,
+                        source_doc=source_doc,
+                        confidence=0.7,
+                    )
+                )
 
         # Link strategies that fix errors
         found_strategies = self._find_strategies(text)
         for error_name in found_errors:
             for strategy_name in found_strategies:
-                triples.append(Triple(
-                    subject_name=strategy_name,
-                    subject_type=EntityType.STRATEGY,
-                    relation_type=RelationType.FIXES,
-                    object_name=error_name,
-                    object_type=EntityType.ERROR_TYPE,
-                    source_doc=source_doc,
-                    confidence=0.6,
-                ))
+                triples.append(
+                    Triple(
+                        subject_name=strategy_name,
+                        subject_type=EntityType.STRATEGY,
+                        relation_type=RelationType.FIXES,
+                        object_name=error_name,
+                        object_type=EntityType.ERROR_TYPE,
+                        source_doc=source_doc,
+                        confidence=0.6,
+                    )
+                )
 
         return triples
 
@@ -296,15 +315,17 @@ class HeuristicExtractor:
         """Extract strategy entities."""
         triples = []
         for strategy_name in self._find_strategies(text):
-            triples.append(Triple(
-                subject_name=strategy_name,
-                subject_type=EntityType.STRATEGY,
-                relation_type=RelationType.RELATED_TO,
-                object_name=strategy_name,
-                object_type=EntityType.STRATEGY,
-                source_doc=source_doc,
-                confidence=0.7,
-            ))
+            triples.append(
+                Triple(
+                    subject_name=strategy_name,
+                    subject_type=EntityType.STRATEGY,
+                    relation_type=RelationType.RELATED_TO,
+                    object_name=strategy_name,
+                    object_type=EntityType.STRATEGY,
+                    source_doc=source_doc,
+                    confidence=0.7,
+                )
+            )
         return triples
 
     # --- Helpers ---
@@ -318,7 +339,7 @@ class HeuristicExtractor:
             all_names = [tech_name] + aliases
             for name in all_names:
                 # Word boundary check to avoid partial matches
-                pattern = r'\b' + re.escape(name.lower()) + r'\b'
+                pattern = r"\b" + re.escape(name.lower()) + r"\b"
                 if re.search(pattern, text_lower):
                     found.append(tech_name)
                     break
@@ -344,18 +365,20 @@ class HeuristicExtractor:
         unique = list(set(names))
 
         for i, name_a in enumerate(unique):
-            for name_b in unique[i + 1:]:
+            for name_b in unique[i + 1 :]:
                 if name_a == name_b:
                     continue
-                triples.append(Triple(
-                    subject_name=name_a,
-                    subject_type=entity_type,
-                    relation_type=RelationType.RELATED_TO,
-                    object_name=name_b,
-                    object_type=entity_type,
-                    source_doc=source_doc,
-                    confidence=0.5,
-                ))
+                triples.append(
+                    Triple(
+                        subject_name=name_a,
+                        subject_type=entity_type,
+                        relation_type=RelationType.RELATED_TO,
+                        object_name=name_b,
+                        object_type=entity_type,
+                        source_doc=source_doc,
+                        confidence=0.5,
+                    )
+                )
 
         return triples
 
@@ -371,27 +394,31 @@ class HeuristicExtractor:
         if topic:
             # Topic as concept
             for tech in self._find_technologies(text):
-                triples.append(Triple(
-                    subject_name=tech,
-                    subject_type=EntityType.TECHNOLOGY,
-                    relation_type=RelationType.RELATED_TO,
-                    object_name=topic.strip().lower(),
-                    object_type=EntityType.CONCEPT,
-                    source_doc=source_doc,
-                    confidence=0.7,
-                ))
+                triples.append(
+                    Triple(
+                        subject_name=tech,
+                        subject_type=EntityType.TECHNOLOGY,
+                        relation_type=RelationType.RELATED_TO,
+                        object_name=topic.strip().lower(),
+                        object_type=EntityType.CONCEPT,
+                        source_doc=source_doc,
+                        confidence=0.7,
+                    )
+                )
 
         if chosen:
             for strategy in self._find_strategies(text):
-                triples.append(Triple(
-                    subject_name=strategy,
-                    subject_type=EntityType.STRATEGY,
-                    relation_type=RelationType.LEARNED_FROM,
-                    object_name=topic.strip().lower() if topic else "decision",
-                    object_type=EntityType.CONCEPT,
-                    source_doc=source_doc,
-                    confidence=0.7,
-                ))
+                triples.append(
+                    Triple(
+                        subject_name=strategy,
+                        subject_type=EntityType.STRATEGY,
+                        relation_type=RelationType.LEARNED_FROM,
+                        object_name=topic.strip().lower() if topic else "decision",
+                        object_type=EntityType.CONCEPT,
+                        source_doc=source_doc,
+                        confidence=0.7,
+                    )
+                )
 
         return triples
 
@@ -405,15 +432,17 @@ class HeuristicExtractor:
 
         if topic:
             for tech in self._find_technologies(text):
-                triples.append(Triple(
-                    subject_name=topic.strip().lower(),
-                    subject_type=EntityType.CONCEPT,
-                    relation_type=RelationType.RELATED_TO,
-                    object_name=tech,
-                    object_type=EntityType.TECHNOLOGY,
-                    source_doc=source_doc,
-                    confidence=0.6,
-                ))
+                triples.append(
+                    Triple(
+                        subject_name=topic.strip().lower(),
+                        subject_type=EntityType.CONCEPT,
+                        relation_type=RelationType.RELATED_TO,
+                        object_name=tech,
+                        object_type=EntityType.TECHNOLOGY,
+                        source_doc=source_doc,
+                        confidence=0.6,
+                    )
+                )
 
         return triples
 
@@ -452,11 +481,28 @@ class HeuristicExtractor:
         ext_techs: list[str] = []
         if file_modified:
             from pathlib import PurePosixPath
+
             ext = PurePosixPath(file_modified).suffix.lower()
             if ext in FILE_EXT_TO_TECH:
                 tech = FILE_EXT_TO_TECH[ext]
                 ext_techs.append(tech)
-                triples.append(Triple(
+                triples.append(
+                    Triple(
+                        subject_name=tech,
+                        subject_type=EntityType.TECHNOLOGY,
+                        relation_type=RelationType.RELATED_TO,
+                        object_name=tech,
+                        object_type=EntityType.TECHNOLOGY,
+                        source_doc=source_doc,
+                        confidence=base_confidence,
+                    )
+                )
+
+        # 2. Technologies from description (and reasoning if available)
+        desc_techs = self._find_technologies(text)
+        for tech in desc_techs:
+            triples.append(
+                Triple(
                     subject_name=tech,
                     subject_type=EntityType.TECHNOLOGY,
                     relation_type=RelationType.RELATED_TO,
@@ -464,64 +510,62 @@ class HeuristicExtractor:
                     object_type=EntityType.TECHNOLOGY,
                     source_doc=source_doc,
                     confidence=base_confidence,
-                ))
-
-        # 2. Technologies from description (and reasoning if available)
-        desc_techs = self._find_technologies(text)
-        for tech in desc_techs:
-            triples.append(Triple(
-                subject_name=tech,
-                subject_type=EntityType.TECHNOLOGY,
-                relation_type=RelationType.RELATED_TO,
-                object_name=tech,
-                object_type=EntityType.TECHNOLOGY,
-                source_doc=source_doc,
-                confidence=base_confidence,
-            ))
+                )
+            )
 
         # 3. Patterns from description (and reasoning)
         search_text = f"{description} {reasoning}" if reasoning else description
         for pattern_triple in self._extract_patterns(search_text, source_doc):
-            triples.append(Triple(
-                subject_name=pattern_triple.subject_name,
-                subject_type=pattern_triple.subject_type,
-                relation_type=pattern_triple.relation_type,
-                object_name=pattern_triple.object_name,
-                object_type=pattern_triple.object_type,
-                source_doc=source_doc,
-                confidence=base_confidence,
-            ))
+            triples.append(
+                Triple(
+                    subject_name=pattern_triple.subject_name,
+                    subject_type=pattern_triple.subject_type,
+                    relation_type=pattern_triple.relation_type,
+                    object_name=pattern_triple.object_name,
+                    object_type=pattern_triple.object_type,
+                    source_doc=source_doc,
+                    confidence=base_confidence,
+                )
+            )
 
         # 4. Strategies from description (and reasoning)
         for strat_triple in self._extract_strategies(search_text, source_doc):
-            triples.append(Triple(
-                subject_name=strat_triple.subject_name,
-                subject_type=strat_triple.subject_type,
-                relation_type=strat_triple.relation_type,
-                object_name=strat_triple.object_name,
-                object_type=strat_triple.object_type,
-                source_doc=source_doc,
-                confidence=base_confidence,
-            ))
+            triples.append(
+                Triple(
+                    subject_name=strat_triple.subject_name,
+                    subject_type=strat_triple.subject_type,
+                    relation_type=strat_triple.relation_type,
+                    object_name=strat_triple.object_name,
+                    object_type=strat_triple.object_type,
+                    source_doc=source_doc,
+                    confidence=base_confidence,
+                )
+            )
 
         # 5. Project USES technology
         if project:
             all_techs = list(set(ext_techs + desc_techs))
             for tech in all_techs:
-                triples.append(Triple(
-                    subject_name=project.strip().lower(),
-                    subject_type=EntityType.CONCEPT,
-                    relation_type=RelationType.USES,
-                    object_name=tech,
-                    object_type=EntityType.TECHNOLOGY,
-                    source_doc=source_doc,
-                    confidence=cooccurrence_confidence,
-                ))
+                triples.append(
+                    Triple(
+                        subject_name=project.strip().lower(),
+                        subject_type=EntityType.CONCEPT,
+                        relation_type=RelationType.USES,
+                        object_name=tech,
+                        object_type=EntityType.TECHNOLOGY,
+                        source_doc=source_doc,
+                        confidence=cooccurrence_confidence,
+                    )
+                )
 
         # 6. Co-occurrence between all technologies
         all_techs = list(set(ext_techs + desc_techs))
-        triples.extend(self._create_cooccurrence_relations(
-            all_techs, EntityType.TECHNOLOGY, source_doc,
-        ))
+        triples.extend(
+            self._create_cooccurrence_relations(
+                all_techs,
+                EntityType.TECHNOLOGY,
+                source_doc,
+            )
+        )
 
         return triples

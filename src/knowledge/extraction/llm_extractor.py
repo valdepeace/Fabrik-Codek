@@ -6,6 +6,7 @@ and parses structured JSON responses into knowledge graph triples.
 
 import asyncio
 import json
+
 import structlog
 
 from src.core.llm_client import LLMClient
@@ -236,15 +237,17 @@ class LLMExtractor:
             if not src or not tgt:
                 continue
 
-            triples.append(Triple(
-                subject_name=src,
-                subject_type=entity_types.get(src, EntityType.CONCEPT),
-                relation_type=rtype,
-                object_name=tgt,
-                object_type=entity_types.get(tgt, EntityType.CONCEPT),
-                source_doc=source_doc,
-                confidence=0.6,
-            ))
+            triples.append(
+                Triple(
+                    subject_name=src,
+                    subject_type=entity_types.get(src, EntityType.CONCEPT),
+                    relation_type=rtype,
+                    object_name=tgt,
+                    object_type=entity_types.get(tgt, EntityType.CONCEPT),
+                    source_doc=source_doc,
+                    confidence=0.6,
+                )
+            )
 
         return triples
 
@@ -255,7 +258,7 @@ class LLMExtractor:
         if stripped.startswith("```"):
             first_newline = stripped.find("\n")
             if first_newline != -1:
-                stripped = stripped[first_newline + 1:]
+                stripped = stripped[first_newline + 1 :]
             if stripped.rstrip().endswith("```"):
                 stripped = stripped.rstrip()[:-3].rstrip()
         return stripped
@@ -269,7 +272,7 @@ class LLMExtractor:
         end = text.rfind("}") + 1
         if end <= start:
             fragment = text[start:]
-            for closer in ['}]}', ']}', '}']:
+            for closer in ["}]}", "]}", "}"]:
                 try:
                     return json.loads(fragment + closer)
                 except json.JSONDecodeError:

@@ -44,22 +44,21 @@ class TranscriptExtractor:
 
         try:
             _, _, triples = self._scan_transcript_with_stats(
-                transcript_path, source_doc=source_doc,
+                transcript_path,
+                source_doc=source_doc,
             )
             return triples
         except Exception as exc:
             logger.warning("failed_to_read_transcript", path=str(transcript_path), error=str(exc))
             return []
 
-    def scan_all_transcripts(
-        self, transcripts_dir: Path, project_filter: str | None = None
-    ) -> tuple[list[Triple], dict]:
-        """Batch scan transcript directories for thinking blocks.
+    def scan_all_transcripts(self, transcripts_dir: Path) -> tuple[list[Triple], dict]:
+        """Batch scan transcript directories for JSONL session transcripts.
+
+        Processes all subdirectories that contain .jsonl files.
 
         Args:
             transcripts_dir: Root directory containing project subdirectories.
-            project_filter: If set, only process subdirs whose name contains this string.
-                            Defaults to FABRIK_PROJECT_FILTER env var, or None (all projects).
 
         Returns:
             Tuple of (triples, stats) where stats contains:
@@ -69,11 +68,6 @@ class TranscriptExtractor:
                 - triples_extracted
                 - errors
         """
-        import os
-
-        if project_filter is None:
-            project_filter = os.environ.get("FABRIK_PROJECT_FILTER", "")
-
         stats = {
             "transcripts_scanned": 0,
             "thinking_blocks_found": 0,
@@ -88,8 +82,6 @@ class TranscriptExtractor:
 
         for subdir in sorted(transcripts_dir.iterdir()):
             if not subdir.is_dir():
-                continue
-            if project_filter and project_filter not in subdir.name:
                 continue
 
             for transcript_file in sorted(subdir.glob("*.jsonl")):
@@ -111,7 +103,9 @@ class TranscriptExtractor:
         return all_triples, stats
 
     def _scan_transcript_with_stats(
-        self, transcript_path: Path, source_doc: str = "",
+        self,
+        transcript_path: Path,
+        source_doc: str = "",
     ) -> tuple[int, int, list[Triple]]:
         """Scan a single transcript file and return detailed stats.
 
@@ -131,7 +125,7 @@ class TranscriptExtractor:
         processed = 0
         triples: list[Triple] = []
 
-        with open(transcript_path, "r", encoding="utf-8", errors="ignore") as f:
+        with open(transcript_path, encoding="utf-8", errors="ignore") as f:
             for line in f:
                 stripped = line.strip()
                 if not stripped:
@@ -202,9 +196,13 @@ class TranscriptExtractor:
         triples.extend(error_triples)
 
         # Co-occurrence relations between technologies
-        tech_names = [t.subject_name for t in tech_triples if t.subject_type == EntityType.TECHNOLOGY]
+        tech_names = [
+            t.subject_name for t in tech_triples if t.subject_type == EntityType.TECHNOLOGY
+        ]
         cooccurrence_triples = self._heuristic._create_cooccurrence_relations(
-            tech_names, EntityType.TECHNOLOGY, source_doc,
+            tech_names,
+            EntityType.TECHNOLOGY,
+            source_doc,
         )
         triples.extend(cooccurrence_triples)
 

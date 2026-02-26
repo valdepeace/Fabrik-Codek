@@ -12,7 +12,7 @@ import math
 import re
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -156,9 +156,7 @@ class CompetenceMap:
     def from_dict(cls, data: dict[str, Any]) -> CompetenceMap:
         """Deserialize from dictionary."""
         return cls(
-            topics=[
-                CompetenceEntry.from_dict(t) for t in data.get("topics", [])
-            ],
+            topics=[CompetenceEntry.from_dict(t) for t in data.get("topics", [])],
             built_at=data.get("built_at", datetime.now().isoformat()),
             total_topics=data.get("total_topics", 0),
         )
@@ -170,12 +168,8 @@ class CompetenceMap:
         Only includes Expert and Competent levels, max 5 each.
         Returns empty string if no Expert or Competent topics exist.
         """
-        expert_topics = [
-            e.topic for e in self.topics if e.level == "Expert"
-        ][:5]
-        competent_topics = [
-            e.topic for e in self.topics if e.level == "Competent"
-        ][:5]
+        expert_topics = [e.topic for e in self.topics if e.level == "Expert"][:5]
+        competent_topics = [e.topic for e in self.topics if e.level == "Competent"][:5]
 
         if not expert_topics and not competent_topics:
             return ""
@@ -243,13 +237,13 @@ def compute_recency_weight(
         return 0.0
 
     if reference_time is None:
-        reference_time = datetime.now(tz=timezone.utc)
+        reference_time = datetime.now(tz=UTC)
 
     # Normalise timezone awareness so subtraction works.
     if last_dt.tzinfo is None and reference_time.tzinfo is not None:
-        last_dt = last_dt.replace(tzinfo=timezone.utc)
+        last_dt = last_dt.replace(tzinfo=UTC)
     elif last_dt.tzinfo is not None and reference_time.tzinfo is None:
-        reference_time = reference_time.replace(tzinfo=timezone.utc)
+        reference_time = reference_time.replace(tzinfo=UTC)
 
     days_elapsed = (reference_time - last_dt).total_seconds() / 86400
 
@@ -382,9 +376,7 @@ class CompetenceBuilder:
             if entity is None:
                 continue
             relations = self.graph.get_relations(entity.id, direction="both")
-            count = sum(
-                1 for r in relations if r.source_id != r.target_id
-            )
+            count = sum(1 for r in relations if r.source_id != r.target_id)
             result[topic] = count
         return result
 
@@ -497,7 +489,6 @@ class CompetenceBuilder:
         3. File extension of ``file_modified`` maps via ``_EXT_TO_TOPIC``.
         """
         matched: list[str] = []
-        topic_set = set(topics)
         record_tags = {t.lower() for t in record.get("tags", [])}
         project = (record.get("project") or "").lower()
         file_modified = record.get("file_modified", "")
@@ -576,15 +567,17 @@ class CompetenceBuilder:
             )
 
             level = _classify_level(final_score)
-            entries_list.append(CompetenceEntry(
-                topic=topic,
-                score=final_score,
-                level=level,
-                entries=count,
-                entity_density=density_s,
-                recency_weight=recency_s,
-                last_activity=last_activity,
-            ))
+            entries_list.append(
+                CompetenceEntry(
+                    topic=topic,
+                    score=final_score,
+                    level=level,
+                    entries=count,
+                    entity_density=density_s,
+                    recency_weight=recency_s,
+                    last_activity=last_activity,
+                )
+            )
 
         # Sort by score descending
         entries_list.sort(key=lambda e: e.score, reverse=True)

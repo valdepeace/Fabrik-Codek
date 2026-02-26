@@ -9,7 +9,6 @@ from src import __version__
 from src.core.llm_client import LLMResponse
 from src.knowledge.graph_schema import Entity, EntityType
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -19,8 +18,13 @@ def _make_llm_response(content="test answer", model="test-model", tokens=42, lat
     return LLMResponse(content=content, model=model, tokens_used=tokens, latency_ms=latency)
 
 
-def _make_entity(id="python_tech", name="Python", entity_type=EntityType.TECHNOLOGY,
-                 mention_count=5, aliases=None):
+def _make_entity(
+    id="python_tech",
+    name="Python",
+    entity_type=EntityType.TECHNOLOGY,
+    mention_count=5,
+    aliases=None,
+):
     return Entity(
         id=id,
         name=name,
@@ -48,9 +52,11 @@ def mock_llm():
 @pytest.fixture
 def mock_rag():
     rag = AsyncMock()
-    rag.retrieve = AsyncMock(return_value=[
-        {"text": "some doc", "source": "file.jsonl", "category": "testing", "score": 0.9},
-    ])
+    rag.retrieve = AsyncMock(
+        return_value=[
+            {"text": "some doc", "source": "file.jsonl", "category": "testing", "score": 0.9},
+        ]
+    )
     rag.close = AsyncMock()
     return rag
 
@@ -74,10 +80,17 @@ def mock_graph():
 @pytest.fixture
 def mock_hybrid():
     hybrid = AsyncMock()
-    hybrid.retrieve = AsyncMock(return_value=[
-        {"text": "hybrid doc", "source": "h.jsonl", "category": "agents", "score": 0.95,
-         "origin": "vector"},
-    ])
+    hybrid.retrieve = AsyncMock(
+        return_value=[
+            {
+                "text": "hybrid doc",
+                "source": "h.jsonl",
+                "category": "agents",
+                "score": 0.95,
+                "origin": "vector",
+            },
+        ]
+    )
     hybrid._owns_rag = False
     return hybrid
 
@@ -568,9 +581,17 @@ class TestOutputFormat:
         from src.interfaces.mcp_server import _state, fabrik_fulltext_search
 
         mock_ft = AsyncMock()
-        mock_ft.search = AsyncMock(return_value=[
-            {"text": "match", "source": "s", "category": "c", "score": 1.0, "origin": "fulltext"},
-        ])
+        mock_ft.search = AsyncMock(
+            return_value=[
+                {
+                    "text": "match",
+                    "source": "s",
+                    "category": "c",
+                    "score": 1.0,
+                    "origin": "fulltext",
+                },
+            ]
+        )
         _state["fulltext"] = mock_ft
         result = await fabrik_fulltext_search(query="test")
 
@@ -591,10 +612,17 @@ class TestFabrikFulltextSearch:
         from src.interfaces.mcp_server import _state, fabrik_fulltext_search
 
         mock_ft = AsyncMock()
-        mock_ft.search = AsyncMock(return_value=[
-            {"text": "exact match result", "source": "training.jsonl",
-             "category": "training", "score": 1.0, "origin": "fulltext"},
-        ])
+        mock_ft.search = AsyncMock(
+            return_value=[
+                {
+                    "text": "exact match result",
+                    "source": "training.jsonl",
+                    "category": "training",
+                    "score": 1.0,
+                    "origin": "fulltext",
+                },
+            ]
+        )
         _state["fulltext"] = mock_ft
 
         result = await fabrik_fulltext_search("exact error message", limit=5)

@@ -1,48 +1,68 @@
 """RAG System - Retrieval Augmented Generation for fabrik-codek.
 
-This module enables fabrik-codek to query accumulated knowledge
-from the datalake to provide context-aware responses.
+Este módulo permite a fabrik-codek consultar el conocimiento acumulado
+en el datalake para dar respuestas contextualizadas.
 
-Usage:
+Uso:
     from src.knowledge.rag import RAGEngine
 
     rag = RAGEngine()
-    await rag.index_datalake()  # Index documents
+    await rag.index_datalake()  # Indexar documentos
 
-    context = await rag.retrieve("how to do JWT authentication")
+    context = await rag.retrieve("cómo hacer autenticación JWT")
     response = await llm.generate(prompt, context=context)
 """
 
 import asyncio
 import hashlib
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 import httpx
 import lancedb
+import structlog
 from lancedb.pydantic import LanceModel, Vector
+from tenacity import (
+    RetryError,
+    before_sleep_log,
+    retry,
+    retry_if_exception,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from src.config import settings
 
 # Configurable via FABRIK_EMBEDDING_DIM env var (default: 768 for nomic-embed-text)
 EMBEDDING_DIM = settings.embedding_dim
 
+logger = structlog.get_logger()
+
+
+def _is_retryable_http_error(exc: BaseException) -> bool:
+    """Only retry transient HTTP errors (429, 5xx)."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code in (429, 500, 502, 503, 504)
+    return False
+
 
 class Document(LanceModel):
-    """Document indexed in the vector database."""
+    """Documento indexado en la base vectorial."""
+
     id: str
     text: str
     vector: Vector(EMBEDDING_DIM)
-    source: str  # Source file
-    category: str  # Document type
-    project: str  # Related project
+    source: str  # Archivo origen
+    category: str  # Tipo de documento
+    project: str  # Proyecto relacionado
     created_at: str
 
 
 class RAGEngine:
-    """RAG engine for semantic search over the datalake."""
+    """Motor RAG para búsqueda semántica en el datalake."""
 
     def __init__(
         self,
@@ -88,6 +108,15 @@ class RAGEngine:
         if self._http_client:
             await self._http_client.aclose()
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=8),
+        retry=(
+            retry_if_exception(_is_retryable_http_error)
+            | retry_if_exception_type((httpx.ConnectError, httpx.TimeoutException, OSError))
+        ),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
+    )
     async def _get_embedding(self, text: str) -> list[float]:
         """Get embedding from Ollama."""
         response = await self._http_client.post(
@@ -100,14 +129,14 @@ class RAGEngine:
         response.raise_for_status()
         return response.json()["embedding"]
 
-    async def _get_embeddings_batch(self, texts: list[str], batch_size: int = 10) -> list[list[float]]:
+    async def _get_embeddings_batch(
+        self, texts: list[str], batch_size: int = 10
+    ) -> list[list[float]]:
         """Get embeddings for multiple texts."""
         embeddings = []
         for i in range(0, len(texts), batch_size):
-            batch = texts[i:i + batch_size]
-            batch_embeddings = await asyncio.gather(
-                *[self._get_embedding(text) for text in batch]
-            )
+            batch = texts[i : i + batch_size]
+            batch_embeddings = await asyncio.gather(*[self._get_embedding(text) for text in batch])
             embeddings.extend(batch_embeddings)
         return embeddings
 
@@ -128,7 +157,7 @@ class RAGEngine:
                 last_newline = chunk.rfind("\n")
                 break_point = max(last_period, last_newline)
                 if break_point > chunk_size // 2:
-                    chunk = chunk[:break_point + 1]
+                    chunk = chunk[: break_point + 1]
                     end = start + break_point + 1
 
             chunks.append(chunk.strip())
@@ -136,7 +165,9 @@ class RAGEngine:
 
         return chunks
 
-    async def index_file(self, file_path: Path, category: str = "general", project: str = "") -> int:
+    async def index_file(
+        self, file_path: Path, category: str = "general", project: str = ""
+    ) -> int:
         """Index a single file."""
         if not file_path.exists():
             return 0
@@ -161,21 +192,25 @@ class RAGEngine:
         documents = []
         for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
             doc_id = hashlib.md5(f"{file_path}:{i}:{chunk[:100]}".encode()).hexdigest()[:16]
-            documents.append(Document(
-                id=doc_id,
-                text=chunk,
-                vector=embedding,
-                source=str(file_path),
-                category=category,
-                project=project,
-                created_at=datetime.now().isoformat(),
-            ))
+            documents.append(
+                Document(
+                    id=doc_id,
+                    text=chunk,
+                    vector=embedding,
+                    source=str(file_path),
+                    category=category,
+                    project=project,
+                    created_at=datetime.now().isoformat(),
+                )
+            )
 
         # Add to table
         self._table.add([doc.model_dump() for doc in documents])
         return len(documents)
 
-    async def index_jsonl(self, file_path: Path, text_field: str = "output", category: str = "training") -> int:
+    async def index_jsonl(
+        self, file_path: Path, text_field: str = "output", category: str = "training"
+    ) -> int:
         """Index a JSONL file (like training pairs)."""
         if not file_path.exists():
             return 0
@@ -183,7 +218,7 @@ class RAGEngine:
         documents = []
         texts = []
 
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(file_path, encoding="utf-8") as f:
             for line in f:
                 try:
                     data = json.loads(line)
@@ -197,16 +232,22 @@ class RAGEngine:
                         text = f"Q: {instruction}\nA: {text}"
 
                     doc_id = data.get("id", hashlib.md5(text[:100].encode()).hexdigest()[:16])
-                    project = data.get("source_file", "").split("/")[0] if "/" in data.get("source_file", "") else ""
+                    project = (
+                        data.get("source_file", "").split("/")[0]
+                        if "/" in data.get("source_file", "")
+                        else ""
+                    )
 
-                    documents.append({
-                        "id": doc_id,
-                        "text": text,
-                        "source": str(file_path),
-                        "category": data.get("category", category),
-                        "project": project,
-                        "created_at": datetime.now().isoformat(),
-                    })
+                    documents.append(
+                        {
+                            "id": doc_id,
+                            "text": text,
+                            "source": str(file_path),
+                            "category": data.get("category", category),
+                            "project": project,
+                            "created_at": datetime.now().isoformat(),
+                        }
+                    )
                     texts.append(text)
                 except json.JSONDecodeError:
                     continue
@@ -244,7 +285,7 @@ class RAGEngine:
                     count = await self.index_jsonl(jsonl_file, category="training")
                     stats["chunks_created"] += count
                     stats["files_indexed"] += 1
-                except (OSError, httpx.HTTPError, json.JSONDecodeError) as e:
+                except (OSError, httpx.HTTPError, json.JSONDecodeError, RetryError):
                     stats["errors"] += 1
 
         # Index decisions
@@ -255,7 +296,7 @@ class RAGEngine:
                     count = await self.index_file(md_file, category="decision")
                     stats["chunks_created"] += count
                     stats["files_indexed"] += 1
-                except (OSError, httpx.HTTPError, UnicodeDecodeError):
+                except (OSError, httpx.HTTPError, UnicodeDecodeError, RetryError):
                     stats["errors"] += 1
 
         # Index learnings
@@ -266,7 +307,7 @@ class RAGEngine:
                     count = await self.index_file(md_file, category="learning")
                     stats["chunks_created"] += count
                     stats["files_indexed"] += 1
-                except (OSError, httpx.HTTPError, UnicodeDecodeError):
+                except (OSError, httpx.HTTPError, UnicodeDecodeError, RetryError):
                     stats["errors"] += 1
 
         # Index code changes (recent ones)
@@ -274,10 +315,12 @@ class RAGEngine:
         if code_changes_dir.exists():
             for jsonl_file in sorted(code_changes_dir.glob("*.jsonl"))[-30:]:  # Last 30 days
                 try:
-                    count = await self.index_jsonl(jsonl_file, text_field="description", category="code_change")
+                    count = await self.index_jsonl(
+                        jsonl_file, text_field="description", category="code_change"
+                    )
                     stats["chunks_created"] += count
                     stats["files_indexed"] += 1
-                except (OSError, httpx.HTTPError, json.JSONDecodeError):
+                except (OSError, httpx.HTTPError, json.JSONDecodeError, RetryError):
                     stats["errors"] += 1
 
         return stats
@@ -286,10 +329,14 @@ class RAGEngine:
         self,
         query: str,
         limit: int = 5,
-        category: Optional[str] = None,
+        category: str | None = None,
     ) -> list[dict]:
         """Retrieve relevant documents for a query."""
-        query_embedding = await self._get_embedding(query)
+        try:
+            query_embedding = await self._get_embedding(query)
+        except RetryError:
+            logger.warning("retrieve_embedding_failed", query=query[:80])
+            return []
 
         # Search
         results = self._table.search(query_embedding).limit(limit)
@@ -326,13 +373,13 @@ class RAGEngine:
 
         context = "\n---\n".join(context_parts)
 
-        return f"""Relevant context from your knowledge base:
+        return f"""Contexto relevante de tu base de conocimiento:
 {context}
 
 ---
-Question: {query}
+Pregunta: {query}
 
-Answer using the context above when relevant."""
+Responde usando el contexto anterior cuando sea relevante."""
 
     def get_stats(self) -> dict:
         """Get index statistics."""

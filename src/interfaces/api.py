@@ -215,8 +215,8 @@ async def lifespan(app: FastAPI):
 
     # 6. Task Router
     try:
-        from src.core.personal_profile import get_active_profile
         from src.core.competence_model import get_active_competence_map
+        from src.core.personal_profile import get_active_profile
         from src.core.task_router import TaskRouter
 
         profile = get_active_profile()
@@ -366,7 +366,9 @@ async def ask(req: AskRequest, request: Request):
     # Hybrid RAG (vector + graph)
     if req.use_graph and getattr(state, "hybrid", None):
         results = await state.hybrid.retrieve(
-            req.prompt, limit=5, graph_depth=graph_depth,
+            req.prompt,
+            limit=5,
+            graph_depth=graph_depth,
         )
         if results:
             context = "\n---\n".join(
@@ -377,7 +379,11 @@ async def ask(req: AskRequest, request: Request):
                 f"Question: {req.prompt}\n\nAnswer using the context when relevant."
             )
             sources = [
-                {"source": r.get("source", ""), "category": r.get("category", ""), "origin": r.get("origin", "")}
+                {
+                    "source": r.get("source", ""),
+                    "category": r.get("category", ""),
+                    "origin": r.get("origin", ""),
+                }
                 for r in results
             ]
 
@@ -385,9 +391,7 @@ async def ask(req: AskRequest, request: Request):
     elif req.use_rag and getattr(state, "rag", None):
         rag_results = await state.rag.retrieve(req.prompt, limit=5)
         if rag_results:
-            context = "\n---\n".join(
-                f"[{r['category']}] {r['text'][:500]}" for r in rag_results
-            )
+            context = "\n---\n".join(f"[{r['category']}] {r['text'][:500]}" for r in rag_results)
             prompt = (
                 f"Context from knowledge base:\n{context}\n\n---\n"
                 f"Question: {req.prompt}\n\nAnswer using the context when relevant."

@@ -1,4 +1,4 @@
-"""Tests for the Adaptive Task Router ."""
+"""Tests for the Adaptive Task Router."""
 
 import asyncio
 import json
@@ -7,9 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from src.core.competence_model import CompetenceEntry, CompetenceMap
 from src.core.personal_profile import PersonalProfile, StyleProfile
 from src.core.task_router import (
-    KEYWORD_CONFIDENCE_THRESHOLD,
     TASK_INSTRUCTIONS,
-    TASK_KEYWORDS,
     TASK_STRATEGIES,
     RetrievalStrategy,
     RoutingDecision,
@@ -22,7 +20,6 @@ from src.core.task_router import (
     get_strategy,
     parse_llm_classification,
 )
-
 
 # ---------------------------------------------------------------------------
 # Task 1: Data model
@@ -73,7 +70,9 @@ class TestKeywordClassification:
         assert confidence > 0.0
 
     def test_architecture_keywords(self):
-        task_type, confidence = classify_by_keywords("what design pattern should I use for this module")
+        task_type, confidence = classify_by_keywords(
+            "what design pattern should I use for this module"
+        )
         assert task_type == "architecture"
 
     def test_explanation_keywords(self):
@@ -123,13 +122,15 @@ class TestKeywordClassification:
 
 class TestTopicDetection:
     def _make_competence_map(self) -> CompetenceMap:
-        return CompetenceMap(topics=[
-            CompetenceEntry(topic="postgresql", score=0.85, level="Expert"),
-            CompetenceEntry(topic="typescript", score=0.6, level="Competent"),
-            CompetenceEntry(topic="docker", score=0.45, level="Competent"),
-            CompetenceEntry(topic="kubernetes", score=0.05, level="Unknown"),
-            CompetenceEntry(topic="angular", score=0.3, level="Novice"),
-        ])
+        return CompetenceMap(
+            topics=[
+                CompetenceEntry(topic="postgresql", score=0.85, level="Expert"),
+                CompetenceEntry(topic="typescript", score=0.6, level="Competent"),
+                CompetenceEntry(topic="docker", score=0.45, level="Competent"),
+                CompetenceEntry(topic="kubernetes", score=0.05, level="Unknown"),
+                CompetenceEntry(topic="angular", score=0.3, level="Novice"),
+            ]
+        )
 
     def test_direct_match(self):
         cmap = self._make_competence_map()
@@ -212,8 +213,14 @@ class TestStrategySelection:
 
     def test_all_task_types_have_strategies(self):
         for task_type in [
-            "debugging", "code_review", "architecture",
-            "explanation", "testing", "devops", "ml_engineering", "general",
+            "debugging",
+            "code_review",
+            "architecture",
+            "explanation",
+            "testing",
+            "devops",
+            "ml_engineering",
+            "general",
         ]:
             s = get_strategy(task_type)
             assert isinstance(s, RetrievalStrategy)
@@ -283,32 +290,42 @@ class TestSystemPromptConstruction:
         )
 
     def _make_competence_map(self) -> CompetenceMap:
-        return CompetenceMap(topics=[
-            CompetenceEntry(topic="postgresql", score=0.85, level="Expert"),
-            CompetenceEntry(topic="docker", score=0.45, level="Competent"),
-        ])
+        return CompetenceMap(
+            topics=[
+                CompetenceEntry(topic="postgresql", score=0.85, level="Expert"),
+                CompetenceEntry(topic="docker", score=0.45, level="Competent"),
+            ]
+        )
 
     def test_includes_profile(self):
         prompt = build_system_prompt(
-            self._make_profile(), self._make_competence_map(), "debugging",
+            self._make_profile(),
+            self._make_competence_map(),
+            "debugging",
         )
         assert "software development" in prompt.lower()
 
     def test_includes_competence(self):
         prompt = build_system_prompt(
-            self._make_profile(), self._make_competence_map(), "debugging",
+            self._make_profile(),
+            self._make_competence_map(),
+            "debugging",
         )
         assert "Expert in: postgresql" in prompt
 
     def test_includes_task_instruction(self):
         prompt = build_system_prompt(
-            self._make_profile(), self._make_competence_map(), "debugging",
+            self._make_profile(),
+            self._make_competence_map(),
+            "debugging",
         )
         assert "root cause" in prompt.lower()
 
     def test_general_no_task_instruction(self):
         prompt = build_system_prompt(
-            self._make_profile(), self._make_competence_map(), "general",
+            self._make_profile(),
+            self._make_competence_map(),
+            "general",
         )
         # Should still have profile and competence, but no task instruction
         assert "software development" in prompt.lower()
@@ -316,20 +333,26 @@ class TestSystemPromptConstruction:
 
     def test_empty_profile(self):
         prompt = build_system_prompt(
-            PersonalProfile(), self._make_competence_map(), "debugging",
+            PersonalProfile(),
+            self._make_competence_map(),
+            "debugging",
         )
         assert "root cause" in prompt.lower()
 
     def test_empty_competence(self):
         prompt = build_system_prompt(
-            self._make_profile(), CompetenceMap(), "code_review",
+            self._make_profile(),
+            CompetenceMap(),
+            "code_review",
         )
         assert "software development" in prompt.lower()
         assert "specific about issues" in prompt.lower()
 
     def test_all_three_layers_present(self):
         prompt = build_system_prompt(
-            self._make_profile(), self._make_competence_map(), "architecture",
+            self._make_profile(),
+            self._make_competence_map(),
+            "architecture",
         )
         # Layer 1: profile
         assert "software development" in prompt.lower()
@@ -340,7 +363,9 @@ class TestSystemPromptConstruction:
 
     def test_unknown_task_type_no_crash(self):
         prompt = build_system_prompt(
-            self._make_profile(), self._make_competence_map(), "nonexistent",
+            self._make_profile(),
+            self._make_competence_map(),
+            "nonexistent",
         )
         assert "software development" in prompt.lower()
 
@@ -393,11 +418,13 @@ class TestTaskRouterIntegration:
             domain_confidence=0.95,
             patterns=["Use Python with FastAPI"],
         )
-        cmap = CompetenceMap(topics=[
-            CompetenceEntry(topic="postgresql", score=0.85, level="Expert"),
-            CompetenceEntry(topic="docker", score=0.45, level="Competent"),
-            CompetenceEntry(topic="kubernetes", score=0.05, level="Unknown"),
-        ])
+        cmap = CompetenceMap(
+            topics=[
+                CompetenceEntry(topic="postgresql", score=0.85, level="Expert"),
+                CompetenceEntry(topic="docker", score=0.45, level="Competent"),
+                CompetenceEntry(topic="kubernetes", score=0.05, level="Unknown"),
+            ]
+        )
         mock_settings = MagicMock()
         mock_settings.default_model = "qwen2.5-coder:14b"
         mock_settings.fallback_model = "qwen2.5-coder:32b"
@@ -474,6 +501,7 @@ class TestCLIIntegrationSmoke:
 
     def test_router_with_real_settings(self):
         from src.config import settings
+
         profile = PersonalProfile()
         cmap = CompetenceMap()
         router = TaskRouter(cmap, profile, settings)
@@ -482,7 +510,8 @@ class TestCLIIntegrationSmoke:
 
 
 # ---------------------------------------------------------------------------
-# Task 8: Strategy overrides # ---------------------------------------------------------------------------
+# Task 8: Strategy overrides
+# ---------------------------------------------------------------------------
 
 
 class TestStrategyOverrides:
@@ -501,10 +530,12 @@ class TestStrategyOverrides:
             domain_confidence=0.95,
             patterns=["Use Python with FastAPI"],
         )
-        cmap = CompetenceMap(topics=[
-            CompetenceEntry(topic="postgresql", score=0.85, level="Expert"),
-            CompetenceEntry(topic="kubernetes", score=0.05, level="Unknown"),
-        ])
+        cmap = CompetenceMap(
+            topics=[
+                CompetenceEntry(topic="postgresql", score=0.85, level="Expert"),
+                CompetenceEntry(topic="kubernetes", score=0.05, level="Unknown"),
+            ]
+        )
         mock_settings = MagicMock()
         mock_settings.default_model = "qwen2.5-coder:14b"
         mock_settings.fallback_model = "qwen2.5-coder:32b"
@@ -551,9 +582,11 @@ class TestStrategyOverrides:
             domain="software_development",
             domain_confidence=0.95,
         )
-        cmap = CompetenceMap(topics=[
-            CompetenceEntry(topic="postgresql", score=0.85, level="Expert"),
-        ])
+        cmap = CompetenceMap(
+            topics=[
+                CompetenceEntry(topic="postgresql", score=0.85, level="Expert"),
+            ]
+        )
         mock_settings = MagicMock()
         mock_settings.default_model = "qwen2.5-coder:14b"
         mock_settings.fallback_model = "qwen2.5-coder:32b"

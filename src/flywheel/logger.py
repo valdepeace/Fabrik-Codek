@@ -7,8 +7,8 @@ This module is kept for backwards compatibility with external projects that
 may still import from src.flywheel.logger. No new code should use it.
 """
 
-import warnings
 import sys
+import warnings
 from pathlib import Path
 
 # Add project root to path to import from utils/
@@ -21,8 +21,10 @@ from utils.logger import (
     QUALITY_THRESHOLDS,
     FabrikLogger,
     QualityValidationError,
-    get_logger as _get_logger,
     reset_logger,
+)
+from utils.logger import (
+    get_logger as _get_logger,
 )
 
 

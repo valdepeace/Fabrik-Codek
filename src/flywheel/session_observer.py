@@ -1,24 +1,27 @@
-"""Session Observer - Learn from conversations with Claude Code.
+"""Session Observer - Aprende de las conversaciones con Claude Code.
 
-This module processes Claude Code transcripts and extracts
-training pairs so fabrik-codek can learn from how Claude
-solves problems.
+Este módulo procesa los transcripts de Claude Code y extrae
+training pairs para que fabrik-codek aprenda de cómo Claude
+resuelve problemas.
 
-Usage:
+Uso:
     python -m src.flywheel.session_observer process
-    python -m src.flywheel.session_observer watch  # Continuous mode
+    python -m src.flywheel.session_observer watch  # Modo continuo
 """
 
-import json
+import asyncio
 import hashlib
-import os
+import json
+import logging
+from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
-from typing import Iterator
 
-# Claude Code paths
+logger = logging.getLogger(__name__)
+
+# Rutas de Claude Code
 CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
-DATALAKE_PATH = Path(os.environ.get("FABRIK_DATALAKE_PATH", Path(__file__).parent.parent.parent / "data"))
+DATALAKE_PATH = Path(__file__).parent.parent.parent / "data"
 SESSIONS_OUTPUT = DATALAKE_PATH / "01-raw" / "sessions"
 TRAINING_OUTPUT = DATALAKE_PATH / "02-processed" / "training-pairs"
 PROCESSED_MARKER = DATALAKE_PATH / "03-metadata" / ".processed_sessions"
@@ -42,7 +45,7 @@ def extract_conversation_pairs(session_file: Path) -> Iterator[dict]:
     """Extract user/assistant pairs from a Claude Code session file."""
     messages = []
 
-    with open(session_file, "r", encoding="utf-8") as f:
+    with open(session_file, encoding="utf-8") as f:
         for line in f:
             try:
                 entry = json.loads(line)
@@ -62,11 +65,13 @@ def extract_conversation_pairs(session_file: Path) -> Iterator[dict]:
                         content = "\n".join(text_parts)
 
                     if content:
-                        messages.append({
-                            "role": entry["type"],
-                            "content": content,
-                            "timestamp": entry.get("timestamp", ""),
-                        })
+                        messages.append(
+                            {
+                                "role": entry["type"],
+                                "content": content,
+                                "timestamp": entry.get("timestamp", ""),
+                            }
+                        )
             except json.JSONDecodeError:
                 continue
 
@@ -87,10 +92,12 @@ def extract_conversation_pairs(session_file: Path) -> Iterator[dict]:
 def categorize_interaction(instruction: str, output: str) -> str:
     """Categorize the type of interaction for better training."""
     instruction_lower = instruction.lower()
-    output_lower = output.lower()
 
     # Code-related
-    if any(kw in instruction_lower for kw in ["escribe", "write", "create", "implement", "función", "function", "class"]):
+    if any(
+        kw in instruction_lower
+        for kw in ["escribe", "write", "create", "implement", "función", "function", "class"]
+    ):
         if "```" in output:
             return "code_generation"
 
@@ -99,11 +106,16 @@ def categorize_interaction(instruction: str, output: str) -> str:
         return "error_fix"
 
     # Refactoring
-    if any(kw in instruction_lower for kw in ["refactor", "improve", "optimize", "mejora", "optimiza"]):
+    if any(
+        kw in instruction_lower for kw in ["refactor", "improve", "optimize", "mejora", "optimiza"]
+    ):
         return "refactor"
 
     # Explanation
-    if any(kw in instruction_lower for kw in ["explain", "what", "how", "why", "explica", "qué", "cómo", "por qué"]):
+    if any(
+        kw in instruction_lower
+        for kw in ["explain", "what", "how", "why", "explica", "qué", "cómo", "por qué"]
+    ):
         return "explanation"
 
     # Review
@@ -111,7 +123,10 @@ def categorize_interaction(instruction: str, output: str) -> str:
         return "code_review"
 
     # Decision
-    if any(kw in instruction_lower for kw in ["should", "better", "recommend", "debería", "mejor", "recomienda"]):
+    if any(
+        kw in instruction_lower
+        for kw in ["should", "better", "recommend", "debería", "mejor", "recomienda"]
+    ):
         return "decision"
 
     return "general"
@@ -227,7 +242,9 @@ def process_all_sessions(min_quality: float = 0.4) -> dict:
 
     # Write all pairs to training file
     if all_pairs:
-        output_file = TRAINING_OUTPUT / f"claude-sessions_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl"
+        output_file = (
+            TRAINING_OUTPUT / f"claude-sessions_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl"
+        )
         with open(output_file, "w", encoding="utf-8") as f:
             for pair in all_pairs:
                 f.write(json.dumps(pair, ensure_ascii=False) + "\n")
@@ -244,7 +261,7 @@ def get_stats() -> dict:
     # Count training pairs
     total_pairs = 0
     for jsonl_file in TRAINING_OUTPUT.glob("claude-sessions_*.jsonl"):
-        with open(jsonl_file, "r") as f:
+        with open(jsonl_file) as f:
             total_pairs += sum(1 for _ in f)
 
     return {
@@ -252,6 +269,32 @@ def get_stats() -> dict:
         "total_training_pairs": total_pairs,
         "training_dir": str(TRAINING_OUTPUT),
     }
+
+
+async def watch_sessions(
+    interval_seconds: int = 60,
+    min_quality: float = 0.4,
+) -> None:
+    """Continuously poll for new sessions and process them.
+
+    Runs process_all_sessions() every interval_seconds. Logs when new
+    sessions are found. Designed to be cancelled via asyncio.CancelledError
+    or by the caller setting a stop event.
+    """
+    logger.info("watch_started, interval=%d", interval_seconds)
+
+    while True:
+        try:
+            stats = process_all_sessions(min_quality=min_quality)
+            if stats["sessions_processed"] > 0:
+                logger.info(
+                    "watch_cycle_processed, sessions=%d, pairs=%d",
+                    stats["sessions_processed"],
+                    stats["pairs_extracted"],
+                )
+        except Exception as e:
+            logger.warning("watch_cycle_error, error=%s", str(e))
+        await asyncio.sleep(interval_seconds)
 
 
 if __name__ == "__main__":
@@ -266,11 +309,11 @@ if __name__ == "__main__":
     if command == "process":
         print("Processing Claude Code sessions...")
         stats = process_all_sessions()
-        print(f"\nResults:")
+        print("\nResults:")
         print(f"  Sessions processed: {stats['sessions_processed']}")
         print(f"  Training pairs extracted: {stats['pairs_extracted']}")
         if stats.get("by_category"):
-            print(f"  By category:")
+            print("  By category:")
             for cat, count in sorted(stats["by_category"].items(), key=lambda x: -x[1]):
                 print(f"    - {cat}: {count}")
         if stats.get("output_file"):
@@ -278,7 +321,7 @@ if __name__ == "__main__":
 
     elif command == "stats":
         stats = get_stats()
-        print(f"Session Observer Stats:")
+        print("Session Observer Stats:")
         print(f"  Sessions processed: {stats['sessions_processed']}")
         print(f"  Total training pairs: {stats['total_training_pairs']}")
         print(f"  Training dir: {stats['training_dir']}")

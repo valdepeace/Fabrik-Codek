@@ -1,12 +1,50 @@
 # Fabrik-Codek
 
-**Model-agnostic local AI dev assistant — Claude Code's little brother**
+**A local AI assistant that learns how you work**
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests: 782](https://img.shields.io/badge/tests-782%20passing-brightgreen.svg)]()
+[![Tests: 847](https://img.shields.io/badge/tests-847%20passing-brightgreen.svg)]()
 
-Fabrik-Codek is a local AI development assistant that works with **any model via Ollama** (Qwen, Llama, DeepSeek, Codestral, Phi, Mistral...) and combines three-tier hybrid retrieval (vector + knowledge graph + full-text search) to provide context-aware coding assistance. It features a CLI, a REST API, and a continuous data flywheel that improves over time. No vendor lock-in — switch models with a flag.
+> A 7B model that knows you is worth more than a 400B that doesn't.
+
+Fabrik-Codek is a **personal cognitive architecture** that runs locally with any Ollama model. It builds a knowledge graph from how you work, profiles your expertise, and adapts its retrieval and response strategy over time — all without sending data anywhere.
+
+It's not just RAG. It's a closed feedback loop: capture your work, extract knowledge, measure competence, route tasks intelligently, observe outcomes, and refine.
+
+## Quick Start
+
+```bash
+git clone https://github.com/ikchain/Fabrik-Codek.git
+cd fabrik-codek
+pip install -e ".[dev]"
+fabrik init
+```
+
+`fabrik init` checks your Python version, detects Ollama, creates a `.env` config, sets up data directories, and downloads the required models.
+
+```bash
+fabrik chat                              # Interactive chat
+fabrik ask "How do I implement a repository pattern?" --rag   # Single question with RAG
+fabrik ask "Optimize this SQL query" --graph                  # Hybrid RAG (vector + graph)
+fabrik status                            # System health
+```
+
+> **Prerequisite**: [Ollama](https://ollama.ai/) must be installed and running. Works with Qwen, Llama, DeepSeek, Codestral, Phi, Mistral, and any other Ollama model. Switch models with `--model` or in `.env`.
+
+## What Makes It Different
+
+Most local AI tools are stateless wrappers around an LLM. Fabrik-Codek is **stateful and adaptive**:
+
+| Capability | What it means |
+|-----------|--------------|
+| **Learns your domain** | Analyzes your datalake to build a Personal Profile — your stack, patterns, and preferences become the system prompt |
+| **Measures your expertise** | Competence Model scores knowledge depth per topic (Expert/Competent/Novice/Unknown) using 4 signals with graceful degradation |
+| **Routes tasks intelligently** | Adaptive Task Router classifies queries, selects the right model, and adapts retrieval strategy per task type |
+| **Observes outcomes** | Outcome Tracker infers response quality from conversational patterns — zero friction, no thumbs up/down |
+| **Self-corrects** | Strategy Optimizer adjusts retrieval parameters for underperforming topic/task combinations |
+| **Keeps knowledge fresh** | Graph Temporal Decay fades stale knowledge; Semantic Drift Detection alerts when contexts shift |
+| **Domain-agnostic** | Works for any profession. A lawyer's datalake produces a legal profile. A trader's datalake produces a trading profile |
 
 ## Architecture
 
@@ -18,26 +56,26 @@ graph TB
         MCP[MCP Server - FastMCP]
     end
 
-    subgraph Core
-        LLM[LLM Client - Ollama]
+    subgraph "Hyper-Personalization Engine"
+        Router[Task Router]
         Profile[Personal Profile]
         Competence[Competence Model]
-        Router[Adaptive Task Router]
         Strategy[Strategy Optimizer]
+        Outcome[Outcome Tracker]
     end
 
-    subgraph Knowledge
-        RAG[RAG Engine - LanceDB]
-        Graph[Knowledge Graph - NetworkX]
-        FT[Full-Text Search - Meilisearch]
+    subgraph "Knowledge Layer"
         Hybrid[Hybrid RAG]
+        RAG[Vector Search - LanceDB]
+        Graph[Knowledge Graph - NetworkX]
+        FT[Full-Text - Meilisearch]
         Extract[Extraction Pipeline]
     end
 
-    subgraph Flywheel
+    subgraph "Data Flywheel"
         Collector[Data Collector]
         Observer[Session Observer]
-        Tracker[Outcome Tracker]
+        Logger[Quality-Gated Logger]
     end
 
     CLI --> Router
@@ -46,165 +84,88 @@ graph TB
     Router --> Profile
     Router --> Competence
     Router --> Strategy
-    Router --> LLM
-    Router --> Hybrid
+    Router -->|3-layer prompt| Hybrid
 
     Hybrid --> RAG
     Hybrid --> Graph
     Hybrid --> FT
 
     Extract --> Graph
-    Extract -->|heuristic| RAG
-    Extract -->|transcript| Graph
+    Extract --> RAG
 
     Collector --> Observer
-    Tracker -->|feedback| Competence
-    Tracker -->|feedback| Strategy
+    Observer --> Extract
+    Outcome -->|feedback| Competence
+    Outcome -->|feedback| Strategy
+    Strategy -->|overrides| Router
 ```
 
-## Features
-
-- **Model-Agnostic**: Works with any Ollama model — Qwen, Llama, DeepSeek, Codestral, Phi, Mistral, and more. Switch with `--model` or in `.env`
-- **Three-Tier Hybrid RAG**: Combines vector search (LanceDB), knowledge graph traversal (NetworkX), and full-text search (Meilisearch) using Reciprocal Rank Fusion (RRF)
-- **Knowledge Graph**: Automatically extracts entities and relationships from training data, code changes, and session transcripts
-- **Full-Text Search**: Optional Meilisearch integration for BM25-style keyword search — degrades gracefully when unavailable
-- **REST API**: FastAPI server with 8 endpoints, API key auth, CORS support, and OpenAPI docs
-- **CLI**: Rich terminal interface with interactive chat, single-question mode, and system management commands
-- **Data Flywheel**: Continuous learning from interactions — captures prompts, responses, and reasoning for future improvement
-- **Session Observer**: Extracts training pairs from Claude Code session transcripts
-- **Extraction Pipeline**: 6-step pipeline (training pairs, decisions, learnings, auto-captures, enriched captures, transcripts)
-- **Graph Completion**: Infers transitive relationships to densify the knowledge graph
-- **Quality-Gated Logger**: Rejects low-quality data to prevent model degradation
-- **Personal Profile**: Domain-agnostic user profiling that analyzes your datalake and generates behavioral instructions for the LLM — the model learns your stack, architecture, and tooling preferences automatically
-- **Competence Model**: Measures depth of knowledge per topic (Expert/Competent/Novice/Unknown) using 4 signals: entry count, graph density, recency, and outcome rate — with graceful degradation when signals are missing
-- **Adaptive Task Router**: Hybrid classification (keyword matching + LLM fallback) that detects task type and topic, selects the right model, adapts retrieval strategy, and builds a 3-layer system prompt — all before the LLM sees the query
-- **Outcome Tracking**: Zero-friction feedback loop that infers response quality from conversational patterns (topic changes, reformulations, negation keywords) — no manual feedback needed
-- **Strategy Optimizer**: Automatically adjusts retrieval parameters (graph depth, vector/graph weights) for underperforming task/topic combinations based on accumulated outcome data
-- **Graph Temporal Decay**: Exponential decay on knowledge graph edges keeps context fresh — older knowledge fades unless reinforced
-- **MCP Server**: FastMCP server with 6 tools + 3 resources, supports stdio and SSE transports — works with Claude Code, OpenClaw, Cursor, and any MCP-compatible agent
-
-## Cognitive Architecture
-
-Fabrik-Codek implements a **cognitive architecture** — a structured system where memory, reasoning, learning, and action work together, much like how a human developer accumulates expertise over time. The **Hyper-Personalization Engine** closes the cognitive loop: the system adapts how it responds, observes whether its responses worked, and refines its strategy.
+### The Cognitive Loop
 
 ```mermaid
 graph LR
-    subgraph Perception
-        RAG[Vector Search]
-        GS[Graph Traversal]
-        FTS[Full-Text Search]
-    end
+    A["You work"] --> B["Flywheel captures it"]
+    B --> C["Extraction Pipeline<br/>builds knowledge"]
+    C --> D["Task Router<br/>Profile + Competence<br/>+ task-specific prompt"]
+    D --> E["LLM responds<br/>with context"]
+    E --> F["Outcome Tracker<br/>infers quality"]
+    F --> G["Strategy Optimizer<br/>adjusts retrieval"]
+    G --> D
 
-    subgraph Memory
-        LTM[Long-Term<br/>Knowledge Graph + LanceDB]
-        EM[Episodic<br/>Session Transcripts]
-        WM[Working<br/>Current Context]
-    end
-
-    subgraph Learning
-        FW[Data Flywheel]
-        QG[Quality Gate]
-        EX[Extraction Pipeline]
-    end
-
-    subgraph Reasoning
-        TB[Thinking Blocks]
-        HE[Heuristic Extraction]
-        LE[LLM Extraction]
-    end
-
-    subgraph Action
-        CLI[CLI]
-        API[REST API]
-        MCP[MCP Server]
-    end
-
-    subgraph Self-Awareness
-        PP[Personal Profile]
-        CM[Competence Model]
-        TR[Task Router]
-        OT[Outcome Tracker]
-        SO[Strategy Optimizer]
-    end
-
-    CLI --> TR
-    API --> TR
-    MCP --> TR
-    TR --> WM
-    TR --> PP
-    TR --> CM
-    WM --> RAG
-    WM --> GS
-    WM --> FTS
-    RAG --> LTM
-    GS --> LTM
-    FTS --> LTM
-    EM --> EX
-    EX --> TB
-    EX --> HE
-    EX --> LE
-    HE --> LTM
-    LE --> LTM
-    FW --> QG
-    QG --> EM
-    OT -->|feedback| CM
-    OT -->|feedback| SO
-    SO -->|overrides| TR
+    style A fill:#2d6a4f,color:#fff
+    style D fill:#1d3557,color:#fff
+    style F fill:#e76f51,color:#fff
+    style G fill:#e9c46a,color:#000
 ```
 
-| Component | Role | Implementation |
-|-----------|------|----------------|
-| **Long-term memory** | Accumulated knowledge that persists across sessions | Knowledge Graph (NetworkX) + Vector DB (LanceDB) |
-| **Episodic memory** | Records of past interactions and reasoning | Session transcripts + auto-captures |
-| **Working memory** | Current conversation context | Prompt + RAG retrieved context |
-| **Perception** | Finding relevant knowledge for a query | Hybrid RAG (vector + graph + full-text via RRF) |
-| **Learning** | Improving from every interaction | Data Flywheel with quality gate |
-| **Reasoning** | Extracting insights from experience | Thinking block + heuristic/LLM entity extraction |
-| **Action** | Interacting with the developer | CLI + REST API + MCP Server |
-| **Self-awareness** | Knowing what it knows and adapting | Personal Profile + Competence Model + Task Router + Outcome Tracker + Strategy Optimizer |
+Every interaction feeds back into the system. The more you use it, the better it gets — not through fine-tuning, but through smarter retrieval and routing.
 
-### Hyper-Personalization Engine
+## Features
 
-The closed-loop adaptive pipeline that makes Fabrik-Codek personal:
+### Knowledge & Retrieval
 
-```
-Query → Task Router → [classify task + detect topic + check competence]
-                    → [select model + adapt retrieval strategy + build 3-layer prompt]
-                    → LLM Response
-                    → Outcome Tracker → [infer accepted/rejected/neutral from next turn]
-                                      → Competence Model → [outcome_rate as 4th signal]
-                                      → Strategy Optimizer → [adjust retrieval for weak spots]
-                                      → Task Router → [uses updated overrides next time]
-```
+- **Three-Tier Hybrid RAG** — Vector search (LanceDB) + knowledge graph traversal (NetworkX) + full-text search (Meilisearch), fused with Reciprocal Rank Fusion
+- **Knowledge Graph** — Automatically extracts entities and relationships from training data, code changes, and session transcripts
+- **11-Step Extraction Pipeline** — From raw data through graph completion, temporal decay, alias deduplication, drift detection, and neighborhood snapshots
+- **Graph Temporal Decay** — `weight = base * 0.5^(days/half_life)` keeps knowledge fresh
+- **Semantic Drift Detection** — Jaccard similarity on neighbor sets between builds; alerts when an entity's context shifts
+- **Graph Completion** — Infers transitive relationships to densify the graph
+- **Full-Text Search** — Optional Meilisearch for BM25-style keyword search; degrades gracefully when unavailable
 
-| Component | What it does |
-|-----------|-------------|
-| **Personal Profile** | Learns your domain, stack, and preferences from the datalake |
-| **Competence Model** | Scores knowledge depth per topic (4 signals, graceful degradation) |
-| **Task Router** | Classifies queries, selects model, adapts retrieval strategy |
-| **Outcome Tracker** | Infers response quality from conversational patterns (zero friction) |
-| **Strategy Optimizer** | Generates retrieval overrides for underperforming combinations |
-| **Graph Temporal Decay** | Fades stale knowledge, reinforces recent activity |
+### Personalization
 
-Unlike frameworks that only describe cognitive architectures in papers, Fabrik-Codek is a **working implementation** with a closed feedback loop — it captures how you work, builds a knowledge graph from your experience, measures your expertise, observes whether its responses help, and refines its strategy over time.
+- **Personal Profile** — Learns your domain, stack, architecture, and tooling preferences from the datalake. Injected as system prompt
+- **Competence Model** — 4 signals (entry count, graph density, recency, outcome rate) with 8 weight sets for graceful degradation
+- **Adaptive Task Router** — Hybrid classification (keyword matching + LLM fallback) with per-task retrieval strategies and model escalation
+- **Outcome Tracking** — Infers response quality from conversational patterns (topic changes, reformulations, negation) without manual feedback
+- **Strategy Optimizer** — Generates retrieval overrides for weak task/topic combinations
 
-> A 7B model that knows you is worth more than a 400B that doesn't.
+### Interfaces
 
-## Personal Profile
+- **CLI** — Rich terminal with interactive chat, single-question mode, and 30+ management commands
+- **REST API** — FastAPI with 8 endpoints, API key auth, CORS, OpenAPI docs
+- **MCP Server** — 6 tools + 3 resources via stdio or SSE — works with Claude Code, Cursor, OpenClaw, and any MCP-compatible agent
 
-The Personal Profile analyzes your datalake and generates **behavioral instructions** that guide the LLM — so the model responds using your actual stack, architecture, and tooling preferences.
+### Data Flywheel
+
+- **Session Observer** — Extracts training pairs from Claude Code session transcripts. Includes `watch` mode for continuous monitoring
+- **Quality-Gated Logger** — Rejects low-quality data (reasoning < 100 chars, lessons < 50 chars) to prevent degradation
+- **Auto-Capture** — Hook-based capture of code changes with optional reasoning enrichment
+
+## Hyper-Personalization Engine
+
+The five components that make Fabrik-Codek personal:
+
+### Personal Profile
+
+Analyzes your datalake and generates behavioral instructions for the LLM.
 
 ```bash
 fabrik profile build   # Analyze datalake, build profile
 fabrik profile show    # View current profile
 ```
 
-**How it works:**
-1. **DatalakeAnalyzer** scans training pairs (categories, tags) and auto-captures (file extensions, projects, tools)
-2. **ProfileBuilder** detects your domain, extracts framework/architecture/infrastructure preferences, and computes topic weights
-3. **System prompt injection** — every `fabrik ask` and `fabrik chat` call passes the profile as a behavioral system prompt
-
-**Example output** (from a real datalake with ~28k entries):
+Example output from a real datalake:
 
 ```
 You are assisting a software development professional.
@@ -212,149 +173,192 @@ Use Python for code examples.
 Prefer FastAPI with async/await and Pydantic.
 Follow DDD and hexagonal architecture.
 Deploy with Docker, Kubernetes, Terraform.
-Build AI agents and RAG pipelines.
 ```
 
-**Domain-agnostic by design.** Software development is the first implemented domain, but the architecture supports any profession. A lawyer's datalake with civil law cases would produce a legal profile. Adding a new domain requires implementing a `_detect_<domain>_patterns()` method (~30 lines).
+Domain-agnostic by design. A lawyer's datalake with civil law cases produces a legal profile. Adding a new domain requires ~30 lines.
 
-## Competence Model
+### Competence Model
 
-While the Personal Profile identifies **what** topics you work with, the Competence Model measures **how deep** your knowledge is in each one. It produces a competence map with Expert/Competent/Novice/Unknown levels per topic.
+Measures **how deep** your knowledge is per topic:
 
 ```bash
-fabrik competence build   # Analyze datalake, build competence map
-fabrik competence show    # View current competence scores
+fabrik competence build   # Build competence map
+fabrik competence show    # View scores per topic
 ```
 
-**How it works:**
+Four signals combined with adaptive weighting:
 
-Four signals are combined per topic with adaptive weighting:
+| Signal | Source | Formula |
+|--------|--------|---------|
+| Entry count | Training pair categories | `log(entries+1) / log(100+1)` |
+| Entity density | Knowledge graph edges | `edge_count / 100` |
+| Recency | Auto-capture timestamps | `0.5^(days/30)` |
+| Outcome rate | Acceptance rate from tracker | `accepted / (accepted + rejected)` |
 
-| Signal | Weight | Source | Formula |
-|--------|--------|--------|---------|
-| **Entry count** | 0.4 | Training pair categories | `log(entries+1) / log(100+1)` |
-| **Entity density** | 0.25 | Knowledge graph edges | `edge_count / 100` |
-| **Recency** | 0.15 | Auto-capture timestamps | `0.5^(days/30)` — exponential decay |
-| **Outcome rate** | 0.2 | Outcome tracker acceptance rate | `accepted / (accepted + rejected)` |
-
-When signals are missing, weights redistribute gracefully across **8 weight sets** (4 with outcome data + 4 without):
-
-| Available signals | Entry | Density | Recency | Outcome |
-|---|---|---|---|---|
-| All four | 0.4 | 0.25 | 0.15 | 0.2 |
-| No graph | 0.5 | — | 0.2 | 0.3 |
-| No recency | 0.45 | 0.3 | — | 0.25 |
-| Entry + outcome only | 0.6 | — | — | 0.4 |
-| Entry + density + recency (no outcome) | 0.5 | 0.3 | 0.2 | — |
-| Entry + recency (no outcome) | 0.7 | — | 0.3 | — |
-| Entry + density (no outcome) | 0.6 | 0.4 | — | — |
-| Entry only (no outcome) | 1.0 | — | — | — |
-
-**Classification thresholds:**
-
-| Level | Score range | Meaning |
-|-------|------------|---------|
-| **Expert** | >= 0.8 | Deep knowledge, confident responses |
-| **Competent** | 0.4 - 0.8 | Solid understanding |
-| **Novice** | 0.1 - 0.4 | Basic awareness |
-| **Unknown** | < 0.1 | No data available |
-
-**System prompt injection** — the competence fragment is automatically appended to the personal profile prompt:
+When signals are missing, weights redistribute gracefully across 8 weight sets. Topics are classified as **Expert** (>= 0.8), **Competent** (0.4-0.8), **Novice** (0.1-0.4), or **Unknown** (< 0.1). The competence fragment is injected alongside the personal profile:
 
 ```
-You are assisting a software development professional.
-Use Python for code examples. Prefer FastAPI with async/await.
 Expert in: postgresql, docker. Competent in: angular, terraform.
 ```
 
-This enables adaptive behavior: expert topics get confident responses, novice topics get honest disclosure, and unknown topics suggest escalation. When outcome data is available, the fourth signal (acceptance rate) continuously refines the scores based on how useful the responses actually were.
+Expert topics get confident responses. Unknown topics suggest escalation.
 
-## Quick Start
+### Adaptive Task Router
 
-```bash
-git clone https://github.com/ikchain/Fabrik-Codek.git
-cd fabrik-codek
-pip install -e ".[dev]"
-fabrik init
-```
-
-`fabrik init` checks your Python version, detects Ollama, creates a `.env` config, sets up data directories, and downloads the required models. After that you're ready:
+Classifies queries and orchestrates the response pipeline:
 
 ```bash
-fabrik chat                    # Interactive chat
-fabrik ask "How do I implement a repository pattern?" --rag   # Single question with RAG
-fabrik status                  # Check system health
+fabrik router test -q "optimize my PostgreSQL query"   # Debug classification
 ```
 
-> **Prerequisite**: [Ollama](https://ollama.ai/) must be installed and running (`ollama serve`). Fabrik-Codek works with any Ollama model — Qwen, Llama, DeepSeek, Codestral, and more.
+- **7 task types**: debugging, code_review, architecture, explanation, testing, devops, ml_engineering
+- **Hybrid classification**: Keyword matching (zero latency) with LLM fallback
+- **Model escalation**: Expert/Competent topics use default model; Novice/Unknown escalate to fallback
+- **Per-task retrieval**: Different graph_depth and vector/graph weights per task type
+- **3-layer system prompt**: Personal Profile + Competence fragment + task-specific instruction
+
+### Outcome Tracking
+
+Closes the cognitive loop with zero-friction feedback:
+
+```bash
+fabrik outcomes show    # Recent outcome records
+fabrik outcomes stats   # Acceptance rates per topic/task type
+```
+
+The tracker observes conversational patterns between turns:
+- **Accepted** — topic changes (user moved on, response was useful)
+- **Rejected** — reformulation or negation keywords detected
+- **Neutral** — session end or single-shot query
+
+### Strategy Optimizer
+
+Automatically adjusts retrieval for underperforming combinations:
+
+- High acceptance rate (>= 0.7): keep current strategy
+- Medium (0.5-0.7): mild boost to graph depth and weights
+- Low (< 0.5): strong boost — deeper graph traversal, heavier graph weight
+
+Overrides are persisted and loaded by the Task Router on next query.
+
+## Knowledge Graph
+
+```bash
+# Build
+fabrik graph build                       # From training data
+fabrik graph build --include-transcripts  # Include session reasoning
+fabrik graph build --force               # Rebuild from scratch
+
+# Maintenance
+fabrik graph complete       # Infer transitive relationships
+fabrik graph decay          # Apply temporal decay to stale edges
+fabrik graph prune          # Remove ghost nodes and weak edges
+fabrik graph aliases        # Merge duplicate entities via embeddings
+fabrik graph drift          # View semantic drift log
+fabrik graph drift --dry-run  # Detect drift without persisting
+
+# Search
+fabrik graph search -q "FastAPI" --depth 3
+fabrik graph stats
+```
+
+### Extraction Pipeline
+
+The `graph build` command runs an 11-step pipeline:
+
+| Step | What it does |
+|------|-------------|
+| 1-6 | Extract entities from training pairs, decisions, learnings, auto-captures, enriched captures, and session transcripts |
+| 7 | **Graph completion** — infer transitive relationships |
+| 8 | **Temporal decay** — fade stale edges based on half-life |
+| 9 | **Alias dedup** — merge duplicate entities via embedding similarity (opt-in) |
+| 10 | **Drift detection** — compare neighbor sets vs previous snapshot |
+| 11 | **Snapshot** — store neighbor sets for next build's comparison |
 
 ## CLI Reference
+
+### Core
 
 | Command | Description |
 |---------|-------------|
 | `fabrik init` | Initialize: check deps, create config, download models |
+| `fabrik status` | System health (Ollama, RAG, Graph, Datalake) |
 | `fabrik chat` | Interactive chat with the assistant |
-| `fabrik ask "..."` | Ask a single question |
-| `fabrik ask "..." --rag` | Ask with vector RAG context |
-| `fabrik ask "..." --graph` | Ask with hybrid RAG (vector + graph) |
-| `fabrik status` | Check system status (Ollama, RAG, Graph) |
-| `fabrik serve` | Start the REST API server |
-| `fabrik mcp` | Start as MCP server (stdio) |
-| `fabrik mcp --transport sse` | Start as MCP server (SSE, network) |
+| `fabrik ask "..." [--rag] [--graph]` | Single question with optional retrieval |
 | `fabrik models` | List available Ollama models |
-| `fabrik rag index` | Index the datalake into the vector DB |
-| `fabrik rag search -q "..."` | Semantic search in the knowledge base |
-| `fabrik rag stats` | Show RAG statistics |
-| `fabrik graph build` | Build the knowledge graph |
-| `fabrik graph build --include-transcripts` | Build including session transcript reasoning |
-| `fabrik graph search -q "..."` | Search entities in the knowledge graph |
-| `fabrik graph stats` | Show graph statistics |
-| `fabrik graph complete` | Run graph completion (infer transitive relations) |
-| `fabrik datalake stats` | Show datalake statistics |
-| `fabrik datalake search -q "..."` | Search files in the datalake |
-| `fabrik flywheel stats` | Show flywheel status |
-| `fabrik flywheel export` | Export training pairs |
+| `fabrik serve` | Start REST API server |
+| `fabrik mcp [--transport sse]` | Start MCP server (stdio or SSE) |
+
+### Knowledge Graph
+
+| Command | Description |
+|---------|-------------|
+| `fabrik graph build [--include-transcripts] [--force]` | Build knowledge graph |
+| `fabrik graph search -q "..."` | Search entities |
+| `fabrik graph stats` | Graph statistics |
+| `fabrik graph complete` | Infer transitive relations |
+| `fabrik graph decay [--dry-run] [--half-life N]` | Apply temporal decay |
+| `fabrik graph prune [--dry-run]` | Remove ghost nodes and weak edges |
+| `fabrik graph aliases` | Detect and merge duplicate entities |
+| `fabrik graph drift [--dry-run] [-q "entity"]` | Semantic drift detection/log |
+
+### RAG & Search
+
+| Command | Description |
+|---------|-------------|
+| `fabrik rag index` | Index datalake into vector DB |
+| `fabrik rag search -q "..."` | Semantic vector search |
+| `fabrik rag stats` | RAG statistics |
 | `fabrik fulltext status` | Check Meilisearch connection |
 | `fabrik fulltext index` | Index datalake into Meilisearch |
 | `fabrik fulltext search -q "..."` | Full-text keyword search |
-| `fabrik competence build` | Build competence map from datalake + graph |
-| `fabrik competence show` | View competence scores per topic |
-| `fabrik outcomes show` | View recent outcome records |
-| `fabrik outcomes stats` | Outcome acceptance rates per topic/task type |
-| `fabrik router test -q "..."` | Debug task classification without executing |
-| `fabrik graph decay` | Apply temporal decay to knowledge graph edges |
-| `fabrik graph prune` | Remove ghost nodes and weak edges |
+
+### Personalization
+
+| Command | Description |
+|---------|-------------|
 | `fabrik profile build` | Build personal profile from datalake |
-| `fabrik profile show` | View current personal profile |
-| `fabrik learn process` | Extract training data from Claude Code sessions |
+| `fabrik profile show` | View current profile |
+| `fabrik competence build` | Build competence map |
+| `fabrik competence show` | View competence scores per topic |
+| `fabrik outcomes show [--topic X]` | View outcome records |
+| `fabrik outcomes stats [--task-type Y]` | Acceptance rates per topic/task |
+| `fabrik router test -q "..."` | Debug task classification |
 
-## API Reference
+### Data Flywheel
 
-Start the server with `fabrik serve` (default: `http://127.0.0.1:8420`).
+| Command | Description |
+|---------|-------------|
+| `fabrik datalake stats` | Datalake statistics |
+| `fabrik datalake search -q "..."` | Search files in datalake |
+| `fabrik flywheel stats` | Flywheel status |
+| `fabrik flywheel export` | Export training pairs |
+| `fabrik learn process` | Extract training data from sessions |
+| `fabrik learn watch [--interval N]` | Continuous session monitoring |
 
-Interactive docs available at `/docs` (Swagger UI) and `/redoc`.
+## REST API
 
-### Endpoints
+Start with `fabrik serve` (default: `http://127.0.0.1:8420`). Interactive docs at `/docs` (Swagger) and `/redoc`.
 
-#### `GET /health`
-Liveness probe.
-```json
-{"status": "ok", "version": "0.1.0", "timestamp": "2026-01-15T10:30:00"}
-```
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Liveness probe (always public) |
+| `/status` | GET | Component status |
+| `/ask` | POST | Ask with optional RAG/graph context |
+| `/chat` | POST | Multi-turn conversation |
+| `/search` | POST | Semantic vector search |
+| `/fulltext/search` | POST | Full-text keyword search |
+| `/graph/search` | POST | Knowledge graph entity search |
+| `/graph/stats` | GET | Graph statistics |
 
-#### `GET /status`
-Component status.
-```json
-{"ollama": "ok", "rag": "ok", "graph": "ok", "fulltext": "ok", "model": "qwen2.5-coder:7b", "datalake": "ok"}
-```
+### Example
 
-#### `POST /ask`
-Ask a question with optional RAG/graph context.
 ```bash
 curl -X POST http://localhost:8420/ask \
   -H "Content-Type: application/json" \
   -d '{"prompt": "How do I handle database migrations?", "use_rag": true}'
 ```
+
 ```json
 {
   "answer": "For database migrations, I recommend using Alembic with SQLAlchemy...",
@@ -365,87 +369,20 @@ curl -X POST http://localhost:8420/ask \
 }
 ```
 
-#### `POST /chat`
-Multi-turn chat with message history.
-```bash
-curl -X POST http://localhost:8420/chat \
-  -H "Content-Type: application/json" \
-  -d '{"messages": [{"role": "user", "content": "Explain dependency injection"}]}'
-```
-
-#### `POST /search`
-Semantic search in the knowledge base.
-```bash
-curl -X POST http://localhost:8420/search \
-  -H "Content-Type: application/json" \
-  -d '{"query": "docker networking", "limit": 5}'
-```
-
-#### `POST /fulltext/search`
-Full-text keyword search via Meilisearch.
-```bash
-curl -X POST http://localhost:8420/fulltext/search \
-  -H "Content-Type: application/json" \
-  -d '{"query": "retry backoff", "limit": 5}'
-```
-
-#### `POST /graph/search`
-Search entities in the knowledge graph.
-```bash
-curl -X POST http://localhost:8420/graph/search \
-  -H "Content-Type: application/json" \
-  -d '{"query": "FastAPI", "depth": 2, "limit": 10}'
-```
-
-#### `GET /graph/stats`
-Knowledge graph statistics.
-```json
-{
-  "entity_count": 245,
-  "edge_count": 1820,
-  "connected_components": 12,
-  "entity_types": {"TECHNOLOGY": 120, "PATTERN": 45, "STRATEGY": 30},
-  "relation_types": {"USES": 500, "DEPENDS_ON": 300, "PART_OF": 200}
-}
-```
-
 ### Authentication
 
-Optional API key authentication. Set `FABRIK_API_KEY` in your `.env`:
-
-```bash
-# .env
-FABRIK_API_KEY=your-secret-key
-```
-
-Then include the key in requests:
-```bash
-# Header
-curl -H "X-API-Key: your-secret-key" http://localhost:8420/status
-
-# Bearer token
-curl -H "Authorization: Bearer your-secret-key" http://localhost:8420/status
-```
-
-The `/health` endpoint is always public (no auth required).
+Optional. Set `FABRIK_API_KEY` in `.env`, then pass via `X-API-Key` header or `Authorization: Bearer` token. The `/health` endpoint is always public.
 
 ## MCP Server
 
-Fabrik-Codek can run as an [MCP](https://modelcontextprotocol.io/) (Model Context Protocol) server, allowing any compatible agent to use it as a local knowledge base.
-
-### Starting the MCP Server
+Run as an [MCP](https://modelcontextprotocol.io/) server for any compatible agent:
 
 ```bash
-# stdio mode (for Claude Code, Cursor, etc.)
-fabrik mcp
-
-# SSE mode (for network access)
-fabrik mcp --transport sse --port 8421
+fabrik mcp                          # stdio (Claude Code, Cursor)
+fabrik mcp --transport sse --port 8421  # SSE (network)
 ```
 
-### Configuring in Claude Code
-
-Add to your `~/.claude/settings.json`:
+**Claude Code config** (`~/.claude/settings.json`):
 
 ```json
 {
@@ -458,134 +395,46 @@ Add to your `~/.claude/settings.json`:
 }
 ```
 
-### Available Tools
-
 | Tool | Description |
 |------|-------------|
-| `fabrik_status` | Check system health (Ollama, RAG, Graph, Datalake) |
-| `fabrik_search` | Semantic vector search in the knowledge base |
-| `fabrik_graph_search` | Search knowledge graph entities and relationships |
-| `fabrik_graph_stats` | Get knowledge graph statistics |
-| `fabrik_fulltext_search` | Full-text keyword search via Meilisearch |
-| `fabrik_ask` | Ask a question with optional RAG/graph context |
+| `fabrik_status` | System health |
+| `fabrik_search` | Semantic vector search |
+| `fabrik_graph_search` | Knowledge graph search |
+| `fabrik_graph_stats` | Graph statistics |
+| `fabrik_fulltext_search` | Full-text keyword search |
+| `fabrik_ask` | Ask with RAG/graph context |
 
-### Available Resources
+Resources: `fabrik://status`, `fabrik://graph/stats`, `fabrik://config`
 
-| URI | Description |
-|-----|-------------|
-| `fabrik://status` | System component status |
-| `fabrik://graph/stats` | Knowledge graph statistics |
-| `fabrik://config` | Current configuration (sanitized) |
+Also available as an [OpenClaw skill](https://clawhub.ai/skills/fabrik-codek) — install with `/install fabrik-codek`.
 
 ## Configuration
 
-All settings are configured via environment variables with the `FABRIK_` prefix, or in a `.env` file.
+All settings via environment variables (`FABRIK_` prefix) or `.env` file.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `FABRIK_OLLAMA_HOST` | `http://localhost:11434` | Ollama server URL |
-| `FABRIK_DEFAULT_MODEL` | `qwen2.5-coder:14b` | Default model for generation |
-| `FABRIK_FALLBACK_MODEL` | `qwen2.5-coder:32b` | Fallback model |
-| `FABRIK_EMBEDDING_MODEL` | `nomic-embed-text` | Model for embeddings |
+| `FABRIK_DEFAULT_MODEL` | `qwen2.5-coder:14b` | Default model |
+| `FABRIK_FALLBACK_MODEL` | `qwen2.5-coder:32b` | Fallback model (for escalation) |
+| `FABRIK_EMBEDDING_MODEL` | `nomic-embed-text` | Embedding model |
 | `FABRIK_TEMPERATURE` | `0.1` | Generation temperature |
 | `FABRIK_MAX_TOKENS` | `4096` | Max tokens per response |
-| `FABRIK_DATALAKE_PATH` | `./data` | Path to datalake storage |
+| `FABRIK_DATALAKE_PATH` | `./data` | Datalake storage path |
 | `FABRIK_API_HOST` | `127.0.0.1` | API bind host |
 | `FABRIK_API_PORT` | `8420` | API bind port |
 | `FABRIK_API_KEY` | _(none)_ | API key (optional) |
 | `FABRIK_API_CORS_ORIGINS` | `["*"]` | Allowed CORS origins |
 | `FABRIK_FLYWHEEL_ENABLED` | `true` | Enable data collection |
 | `FABRIK_VECTOR_DB` | `lancedb` | Vector DB backend |
-| `FABRIK_PROJECT_FILTER` | _(none)_ | Filter transcript dirs by project name |
-| `FABRIK_MEILISEARCH_URL` | `http://localhost:7700` | Meilisearch server URL |
-| `FABRIK_MEILISEARCH_KEY` | _(none)_ | Meilisearch API key (optional) |
+| `FABRIK_PROJECT_FILTER` | _(none)_ | Filter transcript dirs by project |
+| `FABRIK_MEILISEARCH_URL` | `http://localhost:7700` | Meilisearch URL |
+| `FABRIK_MEILISEARCH_KEY` | _(none)_ | Meilisearch API key |
 | `FABRIK_MEILISEARCH_INDEX` | `fabrik_knowledge` | Meilisearch index name |
-| `FABRIK_FULLTEXT_WEIGHT` | `0.0` | Full-text weight in RRF fusion (0.0 = disabled) |
+| `FABRIK_FULLTEXT_WEIGHT` | `0.0` | Full-text weight in RRF (0.0 = disabled) |
+| `FABRIK_GRAPH_DECAY_HALF_LIFE_DAYS` | `90` | Half-life for temporal decay |
 | `FABRIK_LOG_LEVEL` | `INFO` | Log level |
 | `FABRIK_LOG_FORMAT` | `console` | Log format (`console` or `json`) |
-
-## Knowledge Graph
-
-The knowledge graph automatically extracts entities (technologies, patterns, strategies) and their relationships from your data.
-
-### Building the Graph
-
-```bash
-# Basic build from training data
-fabrik graph build
-
-# Include reasoning from Claude Code session transcripts
-fabrik graph build --include-transcripts
-
-# Force rebuild from scratch
-fabrik graph build --force
-
-# Run graph completion (infer transitive relationships)
-fabrik graph complete
-```
-
-### Extraction Pipeline
-
-The pipeline processes data in 6 steps:
-
-1. **Training pairs** — Extract from structured QA data
-2. **Decisions** — Technical decisions with reasoning
-3. **Learnings** — Insights and patterns learned
-4. **Auto-captures** — Automatic code change captures
-5. **Enriched captures** — Captures enriched with reasoning context
-6. **Session transcripts** — Thinking blocks from Claude Code sessions (opt-in)
-
-### Searching the Graph
-
-```bash
-# Find entities
-fabrik graph search -q "PostgreSQL"
-
-# With deeper traversal
-fabrik graph search -q "FastAPI" --depth 3
-
-# View statistics
-fabrik graph stats
-```
-
-## Data Flywheel
-
-Fabrik-Codek continuously captures data from interactions to improve over time.
-
-### How It Works
-
-1. **Automatic capture**: Every prompt/response pair is captured by the flywheel collector
-2. **Quality gating**: The logger rejects low-quality data (reasoning < 100 chars, lessons < 50 chars)
-3. **Session learning**: Extract training pairs from Claude Code session transcripts
-4. **Graph enrichment**: Build and densify the knowledge graph from all captured data
-
-### Using the Logger
-
-```python
-from utils.logger import get_logger
-
-logger = get_logger()
-
-# Log a code change (requires reasoning + lesson)
-logger.log_code_change(
-    file_modified="src/main.py",
-    change_type="updated",
-    description="Added error handling for database connection timeouts with retry logic",
-    reasoning="The system crashed silently when the database was unreachable. "
-              "This caused data loss and poor UX. The fix implements early validation "
-              "with clear error messages.",
-    lesson_learned="Always validate external connections at system boundaries before processing"
-)
-
-# Log an error resolution
-logger.log_error(
-    error_type="ConnectionError",
-    error_message="API timeout after 30s",
-    how_fixed="Increased timeout to 60s and added retry with exponential backoff. "
-              "The external API had variable latency under load.",
-    lesson_learned="External APIs need generous timeouts and retry logic. Never assume constant latency."
-)
-```
 
 ## Project Structure
 
@@ -593,14 +442,13 @@ logger.log_error(
 fabrik-codek/
 ├── src/
 │   ├── config/             # Settings (Pydantic BaseSettings)
-│   ├── core/               # LLM client, Personal Profile, Competence Model,
-│   │   │                   #   Task Router, Strategy Optimizer
-│   ├── interfaces/         # CLI (Typer) + API (FastAPI) + MCP Server (FastMCP)
-│   ├── knowledge/          # RAG, Knowledge Graph, Extraction Pipeline
-│   │   └── extraction/     # Heuristic, LLM, Transcript extractors
-│   ├── flywheel/           # Data collection, Session observer, Outcome Tracker
-│   └── tools/              # Code tools
-├── tests/                  # 782 tests
+│   ├── core/               # LLM client, Profile, Competence, Router, Optimizer
+│   ├── interfaces/         # CLI (Typer) + API (FastAPI) + MCP (FastMCP)
+│   ├── knowledge/          # RAG, Graph, Hybrid RAG, Full-Text
+│   │   └── extraction/     # Heuristic, LLM, Transcript extractors + Pipeline
+│   ├── flywheel/           # Collector, Session Observer, Outcome Tracker
+│   └── tools/              # Code analysis tools
+├── tests/                  # 847 tests
 ├── scripts/                # Setup, benchmarks, enrichment
 ├── data/                   # Local data storage
 ├── prompts/                # Prompt templates
@@ -609,64 +457,21 @@ fabrik-codek/
 
 ## Development
 
-### Running Tests
-
 ```bash
-# All tests
-pytest
-
-# With coverage
-pytest --cov=src --cov-report=term-missing
-
-# Specific test file
-pytest tests/test_api.py -v
+pytest                                    # All tests
+pytest --cov=src --cov-report=term-missing  # With coverage
+pytest tests/test_graph_engine.py -v      # Specific file
 ```
 
-### Running the Eval Benchmark
+### Eval Benchmark
 
 ```bash
-# Evaluate a model
 python scripts/run_eval_benchmark.py --model qwen2.5-coder:7b
-
-# Only one category
 python scripts/run_eval_benchmark.py --model qwen2.5-coder:7b --category code-review
-
-# Compare models
 python scripts/run_eval_benchmark.py --compare "qwen2.5-coder:7b,qwen2.5-coder:14b"
 ```
 
-## Works with Any Agent
-
-Fabrik-Codek integrates with any MCP-compatible agent — [Claude Code](https://claude.ai/claude-code), [OpenClaw](https://openclaw.ai/), [Cursor](https://cursor.com/), and more. Run `fabrik mcp` and point your agent at it. The MCP server exposes search, graph traversal, and LLM queries — your accumulated project knowledge available to any tool.
-
-You can also use the REST API directly (`/search`, `/graph/search`, `/ask`) for non-MCP integrations. The data flywheel captures how *you* work, and any agent can tap into that knowledge.
-
-### OpenClaw Integration
-
-Fabrik-Codek is available as an [OpenClaw skill on ClawHub](https://clawhub.ai/skills/fabrik-codek). Install it with:
-
-```
-/install fabrik-codek
-```
-
-Or configure manually in your `openclaw.json`:
-
-```json
-{
-  "mcpServers": {
-    "fabrik-codek": {
-      "command": "fabrik",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
-The skill exposes all 6 MCP tools to your OpenClaw agent. See [`skills/fabrik-codek/SKILL.md`](skills/fabrik-codek/SKILL.md) for details.
-
 ## Contributing
-
-Contributions are welcome! Please:
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feat/my-feature`)

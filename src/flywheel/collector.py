@@ -76,6 +76,17 @@ class InteractionRecord:
         }
 
 
+@dataclass
+class FeedbackRecord:
+    """Sidecar record for feedback on flushed interactions."""
+
+    record_id: str
+    feedback: Literal["positive", "negative", "neutral"]
+    was_edited: bool = False
+    timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
+    source: str = "manual"  # "manual" | "outcome_tracker"
+
+
 class FlywheelCollector:
     """Collects and stores interaction data for continuous learning.
 
@@ -93,7 +104,7 @@ class FlywheelCollector:
         batch_size: int | None = None,
         enabled: bool | None = None,
     ):
-        self.data_dir = data_dir or settings.raw_data_path
+        self.data_dir = data_dir or settings.datalake_path / "01-raw"
         self.batch_size = batch_size or settings.flywheel_batch_size
         self.enabled = enabled if enabled is not None else settings.flywheel_enabled
 
@@ -105,6 +116,7 @@ class FlywheelCollector:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         (self.data_dir / "interactions").mkdir(exist_ok=True)
         (self.data_dir / "training_pairs").mkdir(exist_ok=True)
+        (self.data_dir / "feedback").mkdir(exist_ok=True)
 
     async def capture(self, record: InteractionRecord) -> None:
         """Capture an interaction record."""
@@ -153,18 +165,97 @@ class FlywheelCollector:
         record_id: str,
         feedback: Literal["positive", "negative", "neutral"],
         was_edited: bool = False,
+        source: str = "manual",
     ) -> None:
-        """Mark feedback for a captured interaction."""
-        # Update in buffer if still there
+        """Mark feedback for a captured interaction.
+
+        If the record is still in the in-memory buffer, updates it directly.
+        Otherwise, appends a FeedbackRecord to the sidecar JSONL file so
+        that feedback is never lost after a buffer flush.
+        """
+        # Try buffer first (fast path)
         async with self._lock:
             for record in self._buffer:
                 if record.id == record_id:
                     record.user_feedback = feedback
                     record.was_edited = was_edited
+                    logger.info(
+                        "flywheel_feedback_buffer",
+                        record_id=record_id,
+                        feedback=feedback,
+                    )
                     return
 
-        # TODO: Update in persisted storage
-        logger.info("flywheel_feedback", record_id=record_id, feedback=feedback)
+        # Record already flushed — persist to sidecar
+        await self._persist_feedback(
+            FeedbackRecord(
+                record_id=record_id,
+                feedback=feedback,
+                was_edited=was_edited,
+                source=source,
+            )
+        )
+
+    async def _persist_feedback(self, fb: FeedbackRecord) -> None:
+        """Append a FeedbackRecord to today's sidecar JSONL file."""
+        today = datetime.now().strftime("%Y-%m-%d")
+        filepath = self.data_dir / "feedback" / f"{today}_feedback.jsonl"
+        try:
+            async with aiofiles.open(filepath, "a", encoding="utf-8") as f:
+                line = json.dumps(asdict(fb), ensure_ascii=False)
+                await f.write(line + "\n")
+            logger.info(
+                "flywheel_feedback_sidecar",
+                record_id=fb.record_id,
+                feedback=fb.feedback,
+                source=fb.source,
+            )
+        except OSError as exc:
+            logger.warning(
+                "flywheel_feedback_write_failed",
+                record_id=fb.record_id,
+                error=str(exc),
+            )
+
+    def _load_feedback_index(self) -> dict[str, FeedbackRecord]:
+        """Load all sidecar feedback files into a lookup dict.
+
+        When multiple entries exist for the same record_id, the one with
+        the latest timestamp wins.
+        """
+        index: dict[str, FeedbackRecord] = {}
+        feedback_dir = self.data_dir / "feedback"
+
+        if not feedback_dir.exists():
+            return index
+
+        for filepath in sorted(feedback_dir.glob("*.jsonl")):
+            try:
+                with filepath.open("r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            data = json.loads(line)
+                            fb = FeedbackRecord(**data)
+                            existing = index.get(fb.record_id)
+                            if existing is None or fb.timestamp > existing.timestamp:
+                                index[fb.record_id] = fb
+                        except (json.JSONDecodeError, TypeError) as exc:
+                            logger.warning(
+                                "feedback_parse_error",
+                                file=str(filepath),
+                                error=str(exc),
+                            )
+            except OSError as exc:
+                logger.warning(
+                    "feedback_read_error",
+                    file=str(filepath),
+                    error=str(exc),
+                )
+
+        return index
 
     async def _flush(self) -> None:
         """Flush buffer to disk."""
@@ -220,10 +311,11 @@ class FlywheelCollector:
 
         interactions_dir = self.data_dir / "interactions"
         training_pairs = []
+        feedback_index = self._load_feedback_index()
 
         # Process all interaction files
         for jsonl_file in interactions_dir.glob("*.jsonl"):
-            async with aiofiles.open(jsonl_file, "r", encoding="utf-8") as f:
+            async with aiofiles.open(jsonl_file, encoding="utf-8") as f:
                 content = await f.read()
                 for line in content.strip().split("\n"):
                     if not line:
@@ -231,6 +323,12 @@ class FlywheelCollector:
                     try:
                         record_data = json.loads(line)
                         record = InteractionRecord(**record_data)
+
+                        # Merge sidecar feedback if available
+                        fb = feedback_index.get(record.id)
+                        if fb is not None:
+                            record.user_feedback = fb.feedback
+                            record.was_edited = fb.was_edited
 
                         # Filter by feedback if specified
                         if min_feedback == "positive" and record.user_feedback != "positive":
@@ -259,6 +357,32 @@ class FlywheelCollector:
         )
 
         return output_path
+
+
+_OUTCOME_TO_FEEDBACK: dict[str, str] = {
+    "accepted": "positive",
+    "rejected": "negative",
+}
+
+
+async def bridge_outcome_to_feedback(
+    collector: FlywheelCollector,
+    outcome: object | None,
+    record_id: str,
+) -> None:
+    """Bridge OutcomeTracker inference to FlywheelCollector feedback.
+
+    Maps accepted -> positive, rejected -> negative. Neutral and None
+    are ignored (no useful signal).
+    """
+    if outcome is None:
+        return
+
+    feedback = _OUTCOME_TO_FEEDBACK.get(getattr(outcome, "outcome", ""), "")
+    if not feedback:
+        return
+
+    await collector.mark_feedback(record_id, feedback, source="outcome_tracker")
 
 
 # Global collector instance

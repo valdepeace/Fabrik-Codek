@@ -1,18 +1,16 @@
 """Extraction pipeline - orchestrates heuristic and LLM extractors."""
 
 import json
-from datetime import datetime
 from pathlib import Path
 
 import structlog
 
 from src.config import settings
 from src.core.llm_client import LLMClient
-from src.knowledge.graph_engine import GraphEngine
-from src.knowledge.graph_schema import Triple
 from src.knowledge.extraction.heuristic import HeuristicExtractor
 from src.knowledge.extraction.llm_extractor import LLMExtractor
 from src.knowledge.extraction.transcript_extractor import TranscriptExtractor
+from src.knowledge.graph_engine import GraphEngine
 
 logger = structlog.get_logger()
 
@@ -102,12 +100,18 @@ class ExtractionPipeline:
             "errors": 0,
         }
 
-    async def build(self, force: bool = False, transcripts_dir: Path | None = None) -> dict:
+    async def build(
+        self,
+        force: bool = False,
+        transcripts_dir: Path | None = None,
+        deduplicate: bool = False,
+    ) -> dict:
         """Build the knowledge graph from datalake data.
 
         Args:
             force: If True, rebuild from scratch. Otherwise, incremental.
             transcripts_dir: Optional path to session transcripts directory.
+            deduplicate: If True, run alias deduplication after build (requires Ollama).
 
         Returns:
             Build statistics dict.
@@ -191,6 +195,29 @@ class ExtractionPipeline:
         self._stats["decay_edges_skipped"] = decay_stats["edges_skipped"]
         logger.info("graph_decay_applied", **decay_stats)
 
+        # 9. Optional alias deduplication (requires Ollama for embeddings)
+        if deduplicate:
+            try:
+                alias_stats = await self._deduplicate_aliases()
+                self._stats["aliases_candidates"] = alias_stats["candidates"]
+                self._stats["aliases_merged"] = alias_stats["merged"]
+                logger.info("alias_deduplication_done", **alias_stats)
+            except Exception as e:
+                logger.warning("alias_deduplication_failed", error=str(e))
+
+        # 10. Semantic drift detection (compare current vs previous snapshot)
+        drift_events = self.engine.detect_drift(threshold=0.7)
+        if drift_events:
+            self.engine.persist_drift_events(drift_events)
+            self._stats["drift_events"] = len(drift_events)
+            logger.info("semantic_drift_detected", events=len(drift_events))
+        else:
+            self._stats["drift_events"] = 0
+
+        # 11. Snapshot neighborhoods for next build's drift comparison
+        snapshot_changed = self.engine.snapshot_neighborhoods()
+        self._stats["snapshot_changed"] = snapshot_changed
+
         # Save graph and state
         self.engine.save()
         state["processed_files"] = processed_files
@@ -200,7 +227,9 @@ class ExtractionPipeline:
         return self._stats
 
     async def _process_training_pairs(
-        self, training_dir: Path, processed_files: dict,
+        self,
+        training_dir: Path,
+        processed_files: dict,
     ) -> None:
         """Process JSONL training pair files."""
         for jsonl_file in sorted(training_dir.glob("*.jsonl")):
@@ -224,7 +253,7 @@ class ExtractionPipeline:
         """Extract triples from a JSONL file using heuristic + optional LLM."""
         source_prefix = file_path.stem
 
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(file_path, encoding="utf-8") as f:
             for line_num, line in enumerate(f):
                 try:
                     pair = json.loads(line)
@@ -243,18 +272,23 @@ class ExtractionPipeline:
                 if self.llm_extractor and self._llm_available:
                     try:
                         llm_triples = await self.llm_extractor.extract_from_pair(
-                            pair, source_doc=f"llm:{source_doc}",
+                            pair,
+                            source_doc=f"llm:{source_doc}",
                         )
                         for triple in llm_triples:
                             self.engine.ingest_triple(triple)
                         self._stats["llm_triples_extracted"] += len(llm_triples)
                     except Exception as e:
-                        logger.debug("llm_pair_extraction_failed", source_doc=source_doc, error=str(e))
+                        logger.debug(
+                            "llm_pair_extraction_failed", source_doc=source_doc, error=str(e)
+                        )
 
                 self._stats["pairs_processed"] += 1
 
     async def _process_decisions(
-        self, decisions_dir: Path, processed_files: dict,
+        self,
+        decisions_dir: Path,
+        processed_files: dict,
     ) -> None:
         """Process decision markdown/JSON files."""
         for dec_file in sorted(decisions_dir.glob("**/*.md")):
@@ -326,7 +360,9 @@ class ExtractionPipeline:
                 self._stats["errors"] += 1
 
     async def _process_learnings(
-        self, learnings_dir: Path, processed_files: dict,
+        self,
+        learnings_dir: Path,
+        processed_files: dict,
     ) -> None:
         """Process learning documents."""
         for learn_file in sorted(learnings_dir.glob("**/*.md")):
@@ -376,7 +412,9 @@ class ExtractionPipeline:
                 self._stats["errors"] += 1
 
     async def _process_auto_captures(
-        self, auto_dir: Path, processed_files: dict,
+        self,
+        auto_dir: Path,
+        processed_files: dict,
     ) -> None:
         """Process auto-capture JSONL files from code-changes."""
         for cap_file in sorted(auto_dir.glob("*auto-captures*.jsonl")):
@@ -393,7 +431,8 @@ class ExtractionPipeline:
                     if record.get("type") != "auto_capture":
                         continue
                     triples = self.heuristic.extract_from_auto_capture(
-                        record, source_doc=file_key,
+                        record,
+                        source_doc=file_key,
                     )
                     for triple in triples:
                         self.engine.ingest_triple(triple)
@@ -407,7 +446,9 @@ class ExtractionPipeline:
                 self._stats["errors"] += 1
 
     async def _process_enriched_captures(
-        self, enriched_dir: Path, processed_files: dict,
+        self,
+        enriched_dir: Path,
+        processed_files: dict,
     ) -> None:
         """Process enriched auto-capture JSONL files (with reasoning)."""
         for enr_file in sorted(enriched_dir.glob("*enriched*.jsonl")):
@@ -424,7 +465,8 @@ class ExtractionPipeline:
                     if record.get("type") != "enriched_capture":
                         continue
                     triples = self.heuristic.extract_from_auto_capture(
-                        record, source_doc=file_key,
+                        record,
+                        source_doc=file_key,
                     )
                     for triple in triples:
                         self.engine.ingest_triple(triple)
@@ -438,19 +480,17 @@ class ExtractionPipeline:
                 self._stats["errors"] += 1
 
     async def _process_transcripts(
-        self, transcripts_dir: Path, processed_files: dict,
+        self,
+        transcripts_dir: Path,
+        processed_files: dict,
     ) -> None:
         """Process session transcripts for thinking block reasoning."""
         if not transcripts_dir.exists():
             return
 
-        import os
-        project_filter = os.environ.get("FABRIK_PROJECT_FILTER", "")
-
         for project_dir in sorted(transcripts_dir.iterdir()):
             if not project_dir.is_dir():
                 continue
-            if project_filter and project_filter not in project_dir.name:
                 continue
 
             for transcript_file in sorted(project_dir.glob("*.jsonl")):
@@ -462,7 +502,8 @@ class ExtractionPipeline:
 
                 try:
                     triples = self.transcript_extractor.extract_from_transcript(
-                        transcript_file, source_doc=file_key,
+                        transcript_file,
+                        source_doc=file_key,
                     )
                     for triple in triples:
                         self.engine.ingest_triple(triple)
@@ -478,6 +519,43 @@ class ExtractionPipeline:
                     )
                     self._stats["errors"] += 1
 
+    async def _deduplicate_aliases(self, threshold: float = 0.85) -> dict:
+        """Compute embeddings for entity names and run alias deduplication.
+
+        Requires Ollama to be running for embedding generation.
+        """
+        import httpx
+
+        entity_names = {eid: entity.name for eid, entity in self.engine._entities.items()}
+        if not entity_names:
+            return {"candidates": 0, "merged": 0, "pairs": []}
+
+        embeddings: dict[str, list[float]] = {}
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            for eid, name in entity_names.items():
+                try:
+                    resp = await client.post(
+                        f"{settings.ollama_host}/api/embeddings",
+                        json={
+                            "model": settings.embedding_model,
+                            "prompt": name,
+                        },
+                    )
+                    resp.raise_for_status()
+                    embeddings[eid] = resp.json()["embedding"]
+                except (httpx.HTTPError, KeyError, OSError):
+                    pass
+
+        if not embeddings:
+            logger.warning("no_embeddings_for_deduplication")
+            return {"candidates": 0, "merged": 0, "pairs": []}
+
+        return self.engine.deduplicate_aliases(
+            embeddings,
+            threshold=threshold,
+            dry_run=False,
+        )
+
     def _parse_markdown_decision(self, content: str, title: str) -> dict:
         """Extract structured data from markdown decision document."""
         decision: dict = {"topic": title}
@@ -490,12 +568,12 @@ class ExtractionPipeline:
                 decision["topic"] = line[2:].strip()
             elif "decision:" in lower or "chosen:" in lower or "option:" in lower:
                 # Next non-empty line is the decision
-                for next_line in lines[i + 1:]:
+                for next_line in lines[i + 1 :]:
                     if next_line.strip():
                         decision["chosen_option"] = next_line.strip()
                         break
             elif "lesson" in lower or "learning" in lower or "takeaway" in lower:
-                for next_line in lines[i + 1:]:
+                for next_line in lines[i + 1 :]:
                     if next_line.strip():
                         decision["lesson_learned"] = next_line.strip()
                         break

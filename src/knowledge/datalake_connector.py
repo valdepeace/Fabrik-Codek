@@ -2,10 +2,10 @@
 
 import asyncio
 import json
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import AsyncIterator, Literal
 
 import aiofiles
 import structlog
@@ -107,9 +107,7 @@ class DatalakeConnector:
         async for file in self._scan_directory(self.path, datalake_name):
             yield file
 
-    async def _scan_directory(
-        self, root: Path, datalake_name: str
-    ) -> AsyncIterator[DatalakeFile]:
+    async def _scan_directory(self, root: Path, datalake_name: str) -> AsyncIterator[DatalakeFile]:
         """Recursively scan a directory for indexable files."""
 
         def _walk_sync():
@@ -150,7 +148,7 @@ class DatalakeConnector:
     async def read_file(self, file: DatalakeFile) -> DatalakeFile:
         """Read content of a datalake file."""
         try:
-            async with aiofiles.open(file.path, "r", encoding="utf-8", errors="ignore") as f:
+            async with aiofiles.open(file.path, encoding="utf-8", errors="ignore") as f:
                 content = await f.read()
 
             # Parse structured files

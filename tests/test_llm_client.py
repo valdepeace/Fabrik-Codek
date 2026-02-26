@@ -552,9 +552,7 @@ class TestEmbeddings:
         async def _test():
             async with LLMClient() as client:
                 mock_resp = MagicMock()
-                mock_resp.json.return_value = {
-                    "embeddings": [[1.0, 2.0], [3.0, 4.0]]
-                }
+                mock_resp.json.return_value = {"embeddings": [[1.0, 2.0], [3.0, 4.0]]}
                 mock_resp.raise_for_status = MagicMock()
                 client._client.post = AsyncMock(return_value=mock_resp)
 
@@ -585,9 +583,7 @@ class TestHealthCheck:
     def test_health_check_failure_connection_error(self, mock_settings):
         async def _test():
             async with LLMClient() as client:
-                client._client.get = AsyncMock(
-                    side_effect=httpx.ConnectError("Connection refused")
-                )
+                client._client.get = AsyncMock(side_effect=httpx.ConnectError("Connection refused"))
 
                 result = await client.health_check()
                 assert result is False
@@ -609,9 +605,7 @@ class TestHealthCheck:
     def test_health_check_timeout(self, mock_settings):
         async def _test():
             async with LLMClient() as client:
-                client._client.get = AsyncMock(
-                    side_effect=httpx.ReadTimeout("Timeout")
-                )
+                client._client.get = AsyncMock(side_effect=httpx.ReadTimeout("Timeout"))
 
                 result = await client.health_check()
                 assert result is False
@@ -621,9 +615,7 @@ class TestHealthCheck:
     def test_health_check_connection_error(self, mock_settings):
         async def _test():
             async with LLMClient() as client:
-                client._client.get = AsyncMock(
-                    side_effect=ConnectionError("Connection refused")
-                )
+                client._client.get = AsyncMock(side_effect=ConnectionError("Connection refused"))
 
                 result = await client.health_check()
                 assert result is False

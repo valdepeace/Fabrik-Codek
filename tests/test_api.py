@@ -10,7 +10,6 @@ from httpx import ASGITransport
 from src import __version__
 from src.core.llm_client import LLMResponse
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -39,9 +38,11 @@ def mock_llm():
 @pytest.fixture
 def mock_rag():
     rag = AsyncMock()
-    rag.retrieve = AsyncMock(return_value=[
-        {"text": "some doc", "source": "file.jsonl", "category": "testing", "score": 0.9},
-    ])
+    rag.retrieve = AsyncMock(
+        return_value=[
+            {"text": "some doc", "source": "file.jsonl", "category": "testing", "score": 0.9},
+        ]
+    )
     rag.close = AsyncMock()
     return rag
 
@@ -67,9 +68,17 @@ def mock_graph():
 @pytest.fixture
 def mock_hybrid():
     hybrid = AsyncMock()
-    hybrid.retrieve = AsyncMock(return_value=[
-        {"text": "hybrid doc", "source": "h.jsonl", "category": "agents", "score": 0.95, "origin": "vector"},
-    ])
+    hybrid.retrieve = AsyncMock(
+        return_value=[
+            {
+                "text": "hybrid doc",
+                "source": "h.jsonl",
+                "category": "agents",
+                "score": 0.95,
+                "origin": "vector",
+            },
+        ]
+    )
     hybrid._owns_rag = False
     return hybrid
 
@@ -116,7 +125,9 @@ def _build_app(llm, rag=None, graph=None, hybrid=None, fulltext=None, ollama_ok=
     test_app.post("/ask", response_model=AskResponse)(api_module.ask)
     test_app.post("/chat", response_model=ChatResponse)(api_module.chat)
     test_app.post("/search", response_model=SearchResponse)(api_module.search)
-    test_app.post("/fulltext/search", response_model=FulltextSearchResponse)(api_module.fulltext_search)
+    test_app.post("/fulltext/search", response_model=FulltextSearchResponse)(
+        api_module.fulltext_search
+    )
     test_app.post("/graph/search", response_model=GraphSearchResponse)(api_module.graph_search)
     test_app.get("/graph/stats", response_model=GraphStatsResponse)(api_module.graph_stats)
 
@@ -341,10 +352,13 @@ class TestChat:
     @pytest.mark.asyncio
     async def test_model_override(self, full_app, mock_llm):
         async with _client(full_app) as c:
-            r = await c.post("/chat", json={
-                "messages": [{"role": "user", "content": "hi"}],
-                "model": "custom-model",
-            })
+            r = await c.post(
+                "/chat",
+                json={
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "model": "custom-model",
+                },
+            )
         assert r.status_code == 200
         assert mock_llm.chat.call_args.kwargs.get("model") == "custom-model"
 
@@ -491,7 +505,13 @@ class TestGraphStats:
         async with _client(full_app) as c:
             r = await c.get("/graph/stats")
         data = r.json()
-        required_keys = {"entity_count", "edge_count", "connected_components", "entity_types", "relation_types"}
+        required_keys = {
+            "entity_count",
+            "edge_count",
+            "connected_components",
+            "entity_types",
+            "relation_types",
+        }
         assert required_keys <= set(data.keys())
 
 
@@ -705,10 +725,17 @@ class TestFulltextSearch:
     @pytest.mark.asyncio
     async def test_returns_results(self, mock_llm):
         mock_ft = AsyncMock()
-        mock_ft.search = AsyncMock(return_value=[
-            {"text": "keyword match", "source": "s.jsonl", "category": "training",
-             "score": 1.0, "origin": "fulltext"},
-        ])
+        mock_ft.search = AsyncMock(
+            return_value=[
+                {
+                    "text": "keyword match",
+                    "source": "s.jsonl",
+                    "category": "training",
+                    "score": 1.0,
+                    "origin": "fulltext",
+                },
+            ]
+        )
         app = _build_app(mock_llm, fulltext=mock_ft)
         async with _client(app) as c:
             r = await c.post("/fulltext/search", json={"query": "keyword", "limit": 5})
